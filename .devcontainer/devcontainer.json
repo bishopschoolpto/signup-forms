@@ -1,0 +1,21 @@
+{
+  "name": "PTO App Environment",
+  // "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "build": {
+		"dockerfile": "Dockerfile"
+	},
+  // "features": {
+  //   "ghcr.io/devcontainers/features/node:1": {
+  //     "version": "22"
+  //   }
+  // },
+  // "postCreateCommand": "npm install -g @anthropic-ai/claude-code",
+  // Installs clasp + Playwright, and headless Chromium with its system libraries for UI tests.
+  "postCreateCommand": "npm install && sudo npx playwright install-deps chromium && npx playwright install chromium",
+  "remoteUser": "vscode",
+  // Publishes the dev server (npm run dev) to the host's localhost:8080. The
+  // devcontainer CLI ignores "forwardPorts"; it applies "appPort" when the container is created.
+  "appPort": ["8080:8080"],
+
+  "runArgs": ["--userns=keep-id", "--tmpfs", "/tmp:exec,mode=1777"]
+}

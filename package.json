@@ -1,0 +1,20 @@
+{
+  "name": "app.bishopschoolpto.com",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PTO volunteer sign-up web app built on Google Apps Script + Google Sheets",
+  "scripts": {
+    "test": "node --test test/unit/",
+    "test:ui": "node --test test/ui/",
+    "test:all": "node --test test/unit/ test/ui/",
+    "dev": "node dev/server.js",
+    "build:site": "node scripts/build-site.js",
+    "push": "clasp push",
+    "status": "clasp status"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@google/clasp": "^3.4.1",
+    "playwright": "^1.63.0"
+  }
+}

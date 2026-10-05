@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <?!= include('Styles') ?>
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="site-header">
+        <span class="logo" aria-hidden="true"><?!= include('PawPrint') ?></span>
+        <p class="org" id="org-name"></p>
+      </header>
+
+      <p id="loading" class="muted" role="status">Loading…</p>
+
+      <section id="error-view" class="notice notice-error" role="alert" hidden></section>
+
+      <!-- No ?event= in the URL: parents are pointed to their organizer's link; organizers can build one. -->
+      <section id="home-view" hidden>
+        <h1>Volunteer sign-up</h1>
+        <p>To sign up, use the link your event organizer shared with you, or pick an event from <button type="button" id="jump-events" class="btn-inline" aria-controls="open-events">Open sign-ups</button> at the bottom of this page.</p>
+
+        <h2 class="guide-heading">Organizers: set up a sign-up</h2>
+        <p class="muted">Each event is a Google Sheet in the PTO's <a href="https://drive.google.com/drive/folders/1yX2nxEPACkQkJLyeWYbRjd-8x0MmK55c" target="_blank" rel="noopener">Events</a> folder. Fill in the sheet, then get a link to share.</p>
+        <details id="setup-guide" class="setup-guide">
+          <summary>Need to create your event spreadsheet? <span class="summary-hint">Show steps 1–6</span></summary>
+          <ol class="steps">
+          <li class="card step">
+            <h3>Open the Events folder</h3>
+            <a class="folder-link" href="https://drive.google.com/drive/folders/1yX2nxEPACkQkJLyeWYbRjd-8x0MmK55c" target="_blank" rel="noopener" aria-label="Open the Events folder in Google Drive (opens in a new tab)">
+              <svg class="folder-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
+              <span class="folder-text"><span class="folder-name">Events</span><span class="folder-hint">Open in Google Drive ↗</span></span>
+            </a>
+            <p class="small">No access? Email <a href="mailto:admin@bishopschoolpto.com">admin@bishopschoolpto.com</a> and ask to be added.</p>
+            <div class="mock-folder" role="img" aria-label="The Events folder in Google Drive, containing the Past events folder, Event Template, and Fall Book Fair (sample)">
+              <div class="mock-folder-path">Apps › <strong>Events</strong></div>
+              <div class="mock-folder-row"><span class="mock-icon mock-icon-folder"></span>Past events</div>
+              <div class="mock-folder-row"><span class="mock-icon mock-icon-sheet"></span>Event Template</div>
+              <div class="mock-folder-row"><span class="mock-icon mock-icon-sheet"></span>Fall Book Fair (sample)</div>
+            </div>
+          </li>
+
+          <li class="card step">
+            <h3>Copy the template or an old event</h3>
+            <p>Open <strong>Event Template</strong>, or a past event like yours, and choose <strong>File → Make a copy</strong>. Name it after your event.</p>
+            <ul class="tips">
+              <li>Keep the copy <strong>directly in the Events folder</strong>, not inside Past events or another folder. Copies of past events land in Past events, so move yours to Events.</li>
+              <li>Copied an old event? On the <strong>Signups</strong> tab, delete every row except the header row. Its old short link and QR code are replaced when you make a new one in step 6.</li>
+            </ul>
+          </li>
+
+          <li class="card step">
+            <h3>Fill in the Event tab</h3>
+            <p>Change only the <strong>Value</strong> column.</p>
+            <div class="mock-sheet-wrap">
+              <table class="mock-sheet">
+                <caption>Event tab</caption>
+                <thead><tr><th></th><th>A</th><th>B</th><th>C</th></tr></thead>
+                <tbody>
+                  <tr class="mock-header"><th>1</th><td>Field</td><td>Value</td><td>Notes</td></tr>
+                  <tr><th>2</th><td>title</td><td class="mock-edit">Fall Book Fair</td><td>Shown at the top of the sign-up page.</td></tr>
+                  <tr><th>3</th><td>description</td><td class="mock-edit">Help students find books…</td><td>Optional. Shown under the title.</td></tr>
+                  <tr><th>4</th><td>location</td><td class="mock-edit">School Library</td><td>Optional.</td></tr>
+                  <tr><th>5</th><td>organizerEmail</td><td class="mock-edit">you@example.com</td><td>Optional. Gets an email for every sign-up and is shown to volunteers.</td></tr>
+                  <tr><th>6</th><td>confirmationSubject</td><td class="mock-edit">See you at the Book Fair, {firstName}!</td><td>Optional. Subject of the volunteer's email.</td></tr>
+                  <tr><th>7</th><td>confirmationMessage</td><td class="mock-edit">Please check in at the front office…</td><td>Optional. Added to the volunteer's email.</td></tr>
+                  <tr><th>8</th><td>organizerSubject</td><td class="mock-edit">[Book Fair] {name} – {slot}</td><td>Optional. Subject of your email for each sign-up.</td></tr>
+                  <tr><th>9</th><td>organizerMessage</td><td class="mock-edit">Add them to the volunteer group chat</td><td>Optional. Added to your email for each sign-up.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </li>
+
+          <li class="card step">
+            <h3>Add your slots on the Slots tab</h3>
+            <p>One row per job or shift. <strong>capacity</strong> is how many volunteers it needs. Type dates and times like <code>10/23/2026 9:00 AM</code>.</p>
+            <div class="mock-sheet-wrap">
+              <table class="mock-sheet">
+                <caption>Slots tab</caption>
+                <thead><tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th></tr></thead>
+                <tbody>
+                  <tr class="mock-header"><th>1</th><td>slotId</td><td>label</td><td>start</td><td>end</td><td>capacity</td></tr>
+                  <tr><th>2</th><td>setup</td><td class="mock-edit">Setup</td><td class="mock-edit">10/23/2026 8:00</td><td class="mock-edit">10/23/2026 9:00</td><td class="mock-edit mock-num">3</td></tr>
+                  <tr><th>3</th><td>checkout</td><td class="mock-edit">Checkout table</td><td class="mock-edit">10/23/2026 9:00</td><td class="mock-edit">10/23/2026 11:00</td><td class="mock-edit mock-num">2</td></tr>
+                  <tr><th>4</th><td class="mock-blank"></td><td class="mock-edit">Cleanup</td><td class="mock-edit">10/23/2026 14:00</td><td class="mock-edit">10/23/2026 15:00</td><td class="mock-edit mock-num">1</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <ul class="tips">
+              <li>Leave <strong>slotId</strong> blank on new rows (like row 4); the app fills it in.</li>
+              <li>Never change or delete a slot people have already signed up for.</li>
+            </ul>
+          </li>
+
+          <li class="card step step-optional">
+            <details id="step-questions" class="optional-step">
+              <summary><h3>Ask volunteers questions (optional)</h3><span class="summary-hint">Show</span></summary>
+              <p>Need a T-shirt size, allergies, or a background-check confirmation? Add one row per question on the <strong>Questions</strong> tab. They appear on the sign-up form, and each answer gets its own column in the Signups tab.</p>
+              <div class="mock-sheet-wrap">
+                <table class="mock-sheet">
+                  <caption>Questions tab</caption>
+                  <thead><tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th></tr></thead>
+                  <tbody>
+                    <tr class="mock-header"><th>1</th><td>question</td><td>type</td><td>options</td><td>required</td></tr>
+                    <tr><th>2</th><td class="mock-edit">T-shirt size</td><td class="mock-edit">choice</td><td class="mock-edit">S, M, L, XL</td><td class="mock-edit">yes</td></tr>
+                    <tr><th>3</th><td class="mock-edit">Food allergies?</td><td class="mock-edit">paragraph</td><td></td><td class="mock-edit">no</td></tr>
+                    <tr><th>4</th><td class="mock-edit">I've completed the district background check</td><td class="mock-edit">checkbox</td><td></td><td class="mock-edit">yes</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <ul class="tips">
+                <li><strong>type</strong>: <code>text</code> (short answer, the default), <code>paragraph</code> (longer answer), <code>choice</code> (pick one of the <strong>options</strong>, separated by commas) or <code>checkbox</code> (a box to tick).</li>
+                <li><strong>required</strong>: <code>yes</code> means volunteers can't sign up without answering (for a checkbox: without ticking it).</li>
+                <li>Up to 10 questions. Avoid renaming a question after people have answered it: the new name starts a new column.</li>
+                <li>No Questions tab? Add a tab named <strong>Questions</strong> with those four column names in row 1.</li>
+              </ul>
+            </details>
+          </li>
+
+          <li class="card step step-optional">
+            <details id="step-email" class="optional-step">
+              <summary><h3>Personalize the emails (optional)</h3><span class="summary-hint">Show</span></summary>
+              <p><strong>The volunteer's email.</strong> Every volunteer gets an email with their slot, time and place. Use the <code>confirmationSubject</code> and <code>confirmationMessage</code> rows to change its subject and add your own message, such as parking, what to bring or what to wear.</p>
+              <p><strong>Your email.</strong> If you set <code>organizerEmail</code>, you get an email for each sign-up with the volunteer's details. Use <code>organizerSubject</code> to give it a subject that's easy to filter, like <code>[Book Fair] {name} – {slot}</code>, and <code>organizerMessage</code> for a reminder to yourself, like "Add them to the volunteer group chat". Waitlist sign-ups keep "Waitlist:" in front.</p>
+              <ul class="tips">
+                <li>These words are replaced with each volunteer's details, in both emails: <code>{firstName}</code> <code>{name}</code> <code>{email}</code> <code>{phone}</code> <code>{event}</code> <code>{slot}</code> <code>{when}</code> <code>{location}</code>. A blank phone number becomes nothing.</li>
+                <li>For a new line in the message, press <strong>Ctrl+Enter</strong> (<strong>⌘+Enter</strong> on a Mac) inside the cell. Web links become clickable.</li>
+                <li>Don't see these rows? Add them at the bottom of the Event tab: the name in column A, your text in column B.</li>
+                <li>To try it out, sign up for your own event, then delete your row from the Signups tab.</li>
+              </ul>
+              <div class="mock-email" role="img" aria-label="Example volunteer confirmation email with a custom subject and message">
+                <p class="mock-email-subject">See you at the Book Fair, Jane!</p>
+                <p>Hi Jane,</p>
+                <p>Thanks for volunteering! You're confirmed for:</p>
+                <p class="mock-email-details">Event: Fall Book Fair<br>Slot: Setup<br>When: Fri, Oct 23, 2026, 8:00 AM – 9:00 AM<br>Where: School Library</p>
+                <p class="mock-email-custom">Please check in at the front office and wear your PTO shirt. Thank you, Jane!</p>
+                <p>Need to change something? Email the organizer at you@example.com.</p>
+              </div>
+            </details>
+          </li>
+          </ol>
+        </details>
+
+        <ol class="steps steps-continued" start="7">
+          <li class="card step">
+            <h3>Get your sign-up link</h3>
+            <p>Copy your spreadsheet's link from your browser's address bar and paste it here. Share the sign-up link, short link, or QR code with volunteers.</p>
+            <p class="small">Don't have an event spreadsheet yet? <button type="button" id="show-setup" class="btn-inline" aria-controls="setup-guide">Follow steps 1–6 to create one</button>.</p>
+            <form id="link-form" class="link-tool" novalidate>
+              <div class="field">
+                <label for="f-sheet">Event spreadsheet link</label>
+                <input id="f-sheet" type="url" placeholder="https://docs.google.com/spreadsheets/d/…" autocomplete="off">
+              </div>
+              <div class="form-actions">
+                <button type="submit" id="link-btn" class="btn btn-primary">Get sign-up link</button>
+              </div>
+              <p id="link-error" class="notice notice-error" role="alert" hidden></p>
+              <div id="link-result" class="notice" role="status" hidden>
+                <p class="link-title">Sign-up link for <strong id="link-event-title"></strong>:</p>
+                <input id="link-output" class="link-output" readonly aria-label="Sign-up link">
+                <p class="small"><a id="link-open" target="_blank" rel="noopener">Open the sign-up page</a></p>
+                <div class="field">
+                  <label for="f-alias">Short link text <span class="muted">(optional)</span></label>
+                  <div class="alias-input">
+                    <span class="alias-prefix" aria-hidden="true">tinyurl.com/</span>
+                    <input id="f-alias" maxlength="60" autocomplete="off" spellcheck="false" placeholder="bishop-book-fair-2026" aria-describedby="alias-help">
+                  </div>
+                  <p id="alias-help" class="muted small">Suggested from your event's title. Change it if you like (5–30 letters, numbers, dashes or underscores), or clear it for a random link.</p>
+                </div>
+                <button type="button" id="short-btn" class="btn btn-outline">Make short link &amp; QR code</button>
+                <p id="short-error" class="notice notice-error" role="alert" hidden></p>
+                <div id="short-result" class="short-result" hidden>
+                  <p class="link-title">Short link:</p>
+                  <input id="short-output" class="link-output" readonly aria-label="Short link">
+                  <img id="qr-image" class="qr-image" width="240" height="240" alt="QR code for the sign-up page">
+                  <p class="small"><a id="qr-download" download="sign-up-qr-code.png">Download QR code</a></p>
+                  <p id="short-saved" class="saved-note small" hidden>✓ Also saved in your spreadsheet: the <strong>Event</strong> tab's <code>shortLink</code> row, with the QR code below it.</p>
+                  <p id="short-not-saved" class="muted small" hidden>We couldn't add this to your spreadsheet this time. Copy it from here, or try again in a minute.</p>
+                </div>
+              </div>
+            </form>
+          </li>
+
+          <li class="card step">
+            <h3>Watch sign-ups on the Signups tab</h3>
+            <p>Each sign-up adds a row. The app writes this tab, so please only change the <strong>status</strong> column. The sign-up page only shows first names and last initials.</p>
+            <div class="mock-sheet-wrap">
+              <table class="mock-sheet">
+                <caption>Signups tab</caption>
+                <thead><tr><th></th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th><th>H</th></tr></thead>
+                <tbody>
+                  <tr class="mock-header"><th>1</th><td>signupId</td><td>slotId</td><td>slotLabel</td><td>name</td><td>email</td><td>phone</td><td>note</td><td>status</td></tr>
+                  <tr><th>2</th><td>988640f1-…</td><td>setup</td><td>Setup</td><td>Jane Doe</td><td>jane@example.com</td><td class="mock-num">555-0100</td><td>Happy to help!</td><td>confirmed</td></tr>
+                  <tr><th>3</th><td>4c1d27a9-…</td><td>setup</td><td>Setup</td><td>Sam Roe</td><td>sam@example.com</td><td></td><td></td><td class="mock-edit">waitlisted</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <ul class="tips">
+              <li>When every slot is full, volunteers can join a slot's <strong>waitlist</strong>. They show up here with status <code>waitlisted</code> and don't take a spot.</li>
+              <li>Volunteers can cancel with the link in their confirmation email. Their status becomes <code>cancelled</code>, and if the slot has a waitlist, the next person in line automatically gets the spot (status <code>confirmed</code>) and an email. You get an email either way.</li>
+              <li>Changing a status yourself doesn't move anyone up. If you cancel someone by hand, give their spot to the next waitlisted person by changing their status to <code>confirmed</code>, and let them know.</li>
+            </ul>
+          </li>
+
+          <li class="card step">
+            <h3>Close sign-ups when you're done</h3>
+            <p>Move your spreadsheet into the <strong>Past events</strong> folder (inside Events). New sign-ups stop right away. The sign-up page still shows who signed up, with a note that sign-ups are closed.</p>
+          </li>
+        </ol>
+        <p class="muted small">Questions or problems? Email <a href="mailto:admin@bishopschoolpto.com">admin@bishopschoolpto.com</a>.</p>
+
+        <section id="open-events" class="open-events" aria-labelledby="open-events-heading" aria-busy="true">
+          <h2 id="open-events-heading">Open sign-ups</h2>
+          <div id="open-events-loading">
+            <p class="loading-line" role="status"><span class="spinner" aria-hidden="true"></span>Loading open sign-ups…</p>
+            <ul class="event-list" aria-hidden="true">
+              <li class="card skeleton"><span class="skeleton-bar skeleton-title"></span><span class="skeleton-bar skeleton-meta"></span></li>
+              <li class="card skeleton"><span class="skeleton-bar skeleton-title"></span><span class="skeleton-bar skeleton-meta"></span></li>
+            </ul>
+          </div>
+          <p id="open-events-status" class="muted" role="status" hidden></p>
+          <ul id="open-events-list" class="event-list" hidden></ul>
+        </section>
+      </section>
+
+      <!-- One event's slots -->
+      <section id="event-view" hidden>
+        <h1 id="event-title"></h1>
+        <p id="event-location" class="event-meta"></p>
+        <p id="event-description" class="event-description"></p>
+        <p id="event-closed" class="notice" hidden>Sign-ups for this event are closed.</p>
+        <p id="event-waitlist" class="notice notice-waitlist" hidden>Every spot is taken. Pick a slot below to join its waitlist: if someone cancels, the next person in line gets their spot automatically and an email.</p>
+        <div id="page-status" class="notice" role="status" hidden></div>
+        <ul id="slot-list" class="slot-list"></ul>
+      </section>
+
+      <!-- Sign-up form (moved under the chosen slot) -->
+      <form id="signup-form" class="signup-form" novalidate hidden>
+        <h2 id="form-heading">Sign up</h2>
+        <p id="form-slot" class="muted"></p>
+        <div class="field">
+          <label for="f-name">Full name <span aria-hidden="true">*</span></label>
+          <input id="f-name" name="name" autocomplete="name" maxlength="100" required>
+          <p class="field-error" id="err-name"></p>
+        </div>
+        <div class="field">
+          <label for="f-email">Email <span aria-hidden="true">*</span></label>
+          <input id="f-email" name="email" type="email" autocomplete="email" maxlength="254" required>
+          <p class="field-error" id="err-email"></p>
+        </div>
+        <div class="field">
+          <label for="f-phone">Phone <span class="muted">(optional)</span></label>
+          <input id="f-phone" name="phone" type="tel" autocomplete="tel" maxlength="30">
+          <p class="field-error" id="err-phone"></p>
+        </div>
+        <div id="custom-fields"></div>
+        <div class="field">
+          <label for="f-note">Note for the organizer <span class="muted">(optional)</span></label>
+          <textarea id="f-note" name="note" rows="2" maxlength="500"></textarea>
+          <p class="field-error" id="err-note"></p>
+        </div>
+        <p id="form-error" class="notice notice-error" role="alert" hidden></p>
+        <div class="form-actions">
+          <button type="submit" id="submit-btn" class="btn btn-primary">Confirm sign-up</button>
+          <button type="button" id="cancel-btn" class="btn btn-link">Cancel</button>
+        </div>
+        <p class="muted small">Only your first name and last initial are shown publicly.</p>
+      </form>
+
+      <!-- Confirmation -->
+      <section id="done-view" class="done" hidden tabindex="-1">
+        <h1 id="done-heading">You're signed up!</h1>
+        <p id="done-waitlist" class="notice notice-waitlist" hidden></p>
+        <dl class="done-details">
+          <dt>Event</dt><dd id="done-event"></dd>
+          <dt>Slot</dt><dd id="done-slot"></dd>
+          <dt>When</dt><dd id="done-when"></dd>
+          <dt id="done-where-label">Where</dt><dd id="done-where"></dd>
+        </dl>
+        <p id="done-email" class="muted"></p>
+        <p id="done-organizer" hidden>Need to change something? Email the organizer at <a id="done-organizer-link"></a>.</p>
+        <button type="button" id="another-btn" class="btn btn-primary">Back to sign-up sheet</button>
+      </section>
+      <!-- Cancel link from a confirmation email: ?event=<id>&cancel=<token> -->
+      <section id="cancel-view" class="cancel-view" hidden tabindex="-1">
+        <h1 id="cancel-heading">Cancel your sign-up?</h1>
+        <p id="cancel-intro"></p>
+        <dl id="cancel-details" class="done-details">
+          <dt>Event</dt><dd id="cancel-event"></dd>
+          <dt>Slot</dt><dd id="cancel-slot"></dd>
+          <dt id="cancel-when-label">When</dt><dd id="cancel-when"></dd>
+          <dt id="cancel-where-label">Where</dt><dd id="cancel-where"></dd>
+        </dl>
+        <p id="cancel-message" class="notice" role="status" hidden></p>
+        <div id="cancel-actions" class="form-actions">
+          <button type="button" id="cancel-confirm-btn" class="btn btn-danger">Yes, cancel my sign-up</button>
+          <a id="cancel-keep" class="btn btn-link">Keep my spot</a>
+        </div>
+        <p id="cancel-after" class="small" hidden><a id="cancel-event-link">Go to the event's sign-up page</a></p>
+      </section>
+    </main>
+    <script type="application/json" id="initial-data"><?!= initialJson ?></script>
+    <?!= include('QrCode') ?>
+    <?!= include('Client') ?>
+  </body>
+</html>

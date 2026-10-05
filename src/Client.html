@@ -1,0 +1,630 @@
+<script>
+  (function () {
+    'use strict';
+
+    var state = { eventId: '', page: null, selectedSlotId: '', waitlist: false, questions: [], cancelToken: '' };
+
+    function $(id) { return document.getElementById(id); }
+
+    function el(tag, className, text) {
+      var node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text != null) node.textContent = text;
+      return node;
+    }
+
+    function show(id, visible) { $(id).hidden = !visible; }
+
+    /** Calls a server function via google.script.run. */
+    function callServer(fnName, arg, onSuccess) {
+      google.script.run
+        .withSuccessHandler(onSuccess)
+        .withFailureHandler(function (err) {
+          console.error(err);
+          setSubmitting(false);
+          showError('Something went wrong. Please refresh the page and try again.');
+        })[fnName](arg);
+    }
+
+    function showError(message) {
+      show('loading', false);
+      $('error-view').textContent = message;
+      show('error-view', true);
+    }
+
+    function eventUrl(eventId) {
+      var base = state.page.baseUrl || '';
+      return eventId ? base + '?event=' + encodeURIComponent(eventId) : base;
+    }
+
+    // ---------- Loading & rendering ----------
+
+    function load(statusMessage) {
+      callServer('getPageData', state.eventId, function (page) { render(page, statusMessage); });
+    }
+
+    function render(page, statusMessage) {
+      state.page = page;
+      show('loading', false);
+      $('org-name').textContent = page.orgName;
+      if (state.cancelToken) {
+        startCancel();
+      } else if (state.eventId) {
+        renderEvent(page.event, statusMessage);
+      } else {
+        show('home-view', true);
+        loadOpenEvents();
+      }
+    }
+
+    /** Page data that doGet embedded in the HTML, or null. */
+    function readInitialData() {
+      try {
+        return JSON.parse($('initial-data').textContent || 'null');
+      } catch (err) {
+        return null;
+      }
+    }
+
+    // ---------- Open events (home page) ----------
+
+    var openEventsRequested = false;
+
+    /** Fetches the list after the home page is showing, so the page itself never waits for it. */
+    function loadOpenEvents() {
+      if (openEventsRequested) return;
+      openEventsRequested = true;
+      google.script.run
+        .withSuccessHandler(renderOpenEvents)
+        .withFailureHandler(function (err) {
+          console.error(err);
+          doneLoadingOpenEvents();
+          $('open-events-status').textContent = 'We couldn\'t load the list of events. You can still use the link your organizer shared.';
+          show('open-events-status', true);
+        })
+        .getOpenEvents();
+    }
+
+    function doneLoadingOpenEvents() {
+      show('open-events-loading', false);
+      $('open-events').removeAttribute('aria-busy');
+    }
+
+    function renderOpenEvents(result) {
+      doneLoadingOpenEvents();
+      var events = (result && result.events) || [];
+      var list = $('open-events-list');
+      list.textContent = '';
+      events.forEach(function (event) {
+        var item = el('li', 'card event-item');
+        var info = el('div');
+        var link = el('a', 'event-link', event.title);
+        link.href = eventUrl(event.eventId);
+        info.appendChild(link);
+        var meta = [event.dates, event.location].filter(Boolean).join(' · ');
+        if (meta) info.appendChild(el('p', 'event-meta-line', meta));
+        item.appendChild(info);
+        item.appendChild(event.spotsLeft > 0
+          ? el('p', 'event-spots', event.spotsLeft + (event.spotsLeft === 1 ? ' spot left' : ' spots left'))
+          : el('p', 'event-spots event-spots-waitlist', 'Full · join the waitlist'));
+        list.appendChild(item);
+      });
+      $('open-events-status').textContent = events.length ? '' : 'No events are taking sign-ups right now.';
+      show('open-events-status', !events.length);
+      show('open-events-list', events.length > 0);
+    }
+
+    // ---------- Organizer guide (home page) ----------
+
+    /** Opens the collapsed "create your spreadsheet" steps and brings them into view. */
+    function showSetupGuide() {
+      var guide = $('setup-guide');
+      guide.open = true;
+      guide.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      guide.querySelector('summary').focus({ preventScroll: true });
+    }
+
+    // ---------- Organizer link tool (home page) ----------
+
+    /** Accepts a spreadsheet URL or a bare id; returns the id or ''. */
+    function spreadsheetIdFrom(text) {
+      text = String(text || '').trim();
+      var fromUrl = text.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]{25,})/);
+      if (fromUrl) return fromUrl[1];
+      return /^[A-Za-z0-9_-]{25,}$/.test(text) ? text : '';
+    }
+
+    function onLinkSubmit(e) {
+      e.preventDefault();
+      show('link-error', false);
+      show('link-result', false);
+      show('short-error', false);
+      show('short-result', false);
+      $('f-alias').value = '';
+      var id = spreadsheetIdFrom($('f-sheet').value);
+      if (!id) {
+        showLinkError('That doesn\'t look like a Google Sheets link. Copy it from your browser\'s address bar while the spreadsheet is open.');
+        return;
+      }
+      $('link-btn').disabled = true;
+      callServer('getPageData', id, function (page) {
+        $('link-btn').disabled = false;
+        if (!page.event) {
+          showLinkError('No sign-up found for that spreadsheet. Check that it is directly in the Events folder, not in a subfolder. ' +
+            'If you just moved it there, wait a minute and try again.');
+          return;
+        }
+        var url = eventUrl(id);
+        state.linkEventId = id;
+        state.linkEventTitle = page.event.title;
+        $('link-event-title').textContent = page.event.title;
+        $('f-alias').value = suggestAlias(page.event, page.orgName);
+        $('link-output').value = url;
+        $('link-open').href = url;
+        show('link-result', true);
+        $('link-output').focus();
+        $('link-output').select();
+      });
+    }
+
+    function showLinkError(message) {
+      $('link-error').textContent = message;
+      show('link-error', true);
+    }
+
+    var ALIAS_PATTERN = /^[A-Za-z0-9_-]{5,30}$/;
+    var MAX_ALIAS_LENGTH = 30;
+
+    /** Lowercase ASCII words: "Parents' Night – Café" → ["parents", "night", "cafe"]. */
+    function slugWords(text) {
+      return String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+        .replace(/['\u2019]/g, '').split(/[^a-z0-9]+/).filter(Boolean);
+    }
+
+    /**
+     * A likely-unused short link text for an event: org's first word, the
+     * title, and the event's year, e.g. "bishop-fall-book-fair-2026". Words
+     * are dropped from the end of the title until it fits in 30 characters.
+     * Returns '' if the title has no usable words.
+     */
+    function suggestAlias(event, orgName) {
+      var title = slugWords(event.title);
+      if (!title.length) return '';
+      var org = slugWords(orgName)[0];
+      var prefix = org && title.indexOf(org) === -1 ? [org] : [];
+      var years = (event.slots || []).map(function (s) { return (/\b(20\d\d)\b/.exec(s.when || '') || [])[1]; }).filter(Boolean);
+      var titleHasYear = title.some(function (w) { return /^20\d\d$/.test(w); });
+      var suffix = years.length && !titleHasYear ? [years[0]] : [];
+      var words = title.slice();
+      var alias = prefix.concat(words, suffix).join('-');
+      while (alias.length > MAX_ALIAS_LENGTH && words.length > 1) {
+        words.pop();
+        alias = prefix.concat(words, suffix).join('-');
+      }
+      alias = alias.slice(0, MAX_ALIAS_LENGTH).replace(/-+$/, '');
+      return ALIAS_PATTERN.test(alias) ? alias : '';
+    }
+
+    function onShortLinkClick() {
+      show('short-error', false);
+      // Accept a pasted "tinyurl.com/…" too.
+      var alias = $('f-alias').value.trim().replace(/^(https?:\/\/)?(www\.)?tinyurl\.com\//i, '');
+      $('f-alias').value = alias;
+      if (alias && !ALIAS_PATTERN.test(alias)) {
+        $('short-error').textContent = 'Short link text must be 5–30 letters, numbers, dashes (-) or underscores (_).';
+        show('short-error', true);
+        $('f-alias').focus();
+        return;
+      }
+      $('short-btn').disabled = true;
+      var request = { eventId: state.linkEventId, baseUrl: state.page.baseUrl, alias: alias };
+      callServer('getShortLink', request, function (result) {
+        $('short-btn').disabled = false;
+        if (!result.ok) {
+          $('short-error').textContent = result.message || 'We couldn\'t make a short link. Please try again.';
+          show('short-error', true);
+          if (/ALIAS/.test(result.error)) $('f-alias').focus();
+          return;
+        }
+        var qr = qrPngDataUrl(result.shortUrl);
+        $('short-output').value = result.shortUrl;
+        $('qr-image').src = qr;
+        $('qr-download').href = qr;
+        $('qr-download').download = fileNameFor(state.linkEventTitle) + '-qr-code.png';
+        show('short-saved', !!result.savedToSheet);
+        show('short-not-saved', !result.savedToSheet);
+        show('short-result', true);
+        $('short-output').focus();
+        $('short-output').select();
+      });
+    }
+
+    /** A black-on-white PNG QR code (with the standard 4-module margin) as a data: URL. */
+    function qrPngDataUrl(text) {
+      var qr = qrcode(0, 'M');
+      qr.addData(text);
+      qr.make();
+      var margin = 4, scale = 10, count = qr.getModuleCount();
+      var canvas = document.createElement('canvas');
+      canvas.width = canvas.height = (count + 2 * margin) * scale;
+      var g = canvas.getContext('2d');
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, canvas.width, canvas.height);
+      g.fillStyle = '#000';
+      for (var r = 0; r < count; r++) {
+        for (var c = 0; c < count; c++) {
+          if (qr.isDark(r, c)) g.fillRect((c + margin) * scale, (r + margin) * scale, scale, scale);
+        }
+      }
+      return canvas.toDataURL('image/png');
+    }
+
+    function fileNameFor(title) {
+      return String(title || 'sign-up').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'sign-up';
+    }
+
+    function renderEvent(event, statusMessage) {
+      if (!event) {
+        showError('We couldn\'t find that sign-up. It may have been removed.');
+        return;
+      }
+      document.title = event.title + ' – ' + state.page.orgName;
+      $('event-title').textContent = event.title;
+      $('event-location').textContent = event.location || '';
+      $('event-description').textContent = event.description || '';
+      show('event-closed', !event.isOpen);
+      show('event-waitlist', !!event.waitlistOpen);
+
+      $('page-status').textContent = statusMessage || '';
+      show('page-status', !!statusMessage);
+
+      // Park the form outside the list before re-rendering slots.
+      document.querySelector('main').appendChild($('signup-form'));
+      show('signup-form', false);
+
+      var list = $('slot-list');
+      list.textContent = '';
+      event.slots.forEach(function (slot) {
+        list.appendChild(renderSlot(slot, event));
+      });
+      show('done-view', false);
+      show('event-view', true);
+    }
+
+    function renderSlot(slot, event) {
+      var item = el('li', 'card slot' + (slot.remaining === 0 ? ' slot-full' : ''));
+      item.id = 'slot-' + slot.slotId;
+      item.dataset.slotId = slot.slotId;
+
+      var top = el('div', 'slot-top');
+      var info = el('div');
+      info.appendChild(el('p', 'slot-label', slot.label));
+      if (slot.when) info.appendChild(el('p', 'slot-when', slot.when));
+      top.appendChild(info);
+
+      var joinWaitlist = !!event.waitlistOpen; // only when every slot is full
+      if ((event.isOpen && slot.remaining > 0) || joinWaitlist) {
+        var action = joinWaitlist ? 'Join waitlist' : 'Sign up';
+        var btn = el('button', 'btn btn-outline', action);
+        btn.type = 'button';
+        btn.setAttribute('aria-label', action + ' for ' + slot.label + (slot.when ? ', ' + slot.when : ''));
+        btn.addEventListener('click', function () { selectSlot(slot, item, joinWaitlist); });
+        top.appendChild(btn);
+      }
+      item.appendChild(top);
+
+      var meter = el('div', 'slot-meter');
+      meter.setAttribute('aria-hidden', 'true');
+      var fill = el('span');
+      fill.style.width = (slot.capacity ? Math.round(100 * slot.filled / slot.capacity) : 100) + '%';
+      meter.appendChild(fill);
+      item.appendChild(meter);
+
+      item.appendChild(el('p', 'slot-count', (slot.remaining === 0
+        ? 'Full (' + slot.capacity + ' of ' + slot.capacity + ')'
+        : slot.remaining + ' of ' + slot.capacity + (slot.capacity === 1 ? ' spot' : ' spots') + ' left') +
+        (slot.waitlisted ? ' · ' + slot.waitlisted + ' on the waitlist' : '')));
+      if (slot.volunteers.length) {
+        item.appendChild(el('p', 'slot-names', 'Signed up: ' + slot.volunteers.join(', ')));
+      }
+      return item;
+    }
+
+    // ---------- Sign-up form ----------
+
+    var FIELDS = ['name', 'email', 'phone', 'note'];
+
+    /** Every form field the server can flag: { key, input, error } (custom questions use "answer:<label>"). */
+    function formFields() {
+      return FIELDS.map(function (f) { return { key: f, input: $('f-' + f), error: $('err-' + f) }; })
+        .concat(state.questions.map(function (q, i) {
+          return { key: 'answer:' + q.label, input: $('f-q' + i), error: $('err-q' + i) };
+        }));
+    }
+
+    /** Builds the organizer's custom questions into the form, before the note. */
+    function renderQuestions(questions) {
+      state.questions = questions || [];
+      var box = $('custom-fields');
+      box.textContent = '';
+      state.questions.forEach(function (q, i) {
+        var id = 'f-q' + i;
+        var field = el('div', 'field' + (q.type === 'checkbox' ? ' field-check' : ''));
+        var label = el('label');
+        label.htmlFor = id;
+        var input;
+        if (q.type === 'choice') {
+          input = el('select');
+          var blank = el('option', null, 'Choose…');
+          blank.value = '';
+          input.appendChild(blank);
+          q.options.forEach(function (o) {
+            var option = el('option', null, o);
+            option.value = o;
+            input.appendChild(option);
+          });
+        } else if (q.type === 'paragraph') {
+          input = el('textarea');
+          input.rows = 3;
+          input.maxLength = 1000;
+        } else if (q.type === 'checkbox') {
+          input = el('input');
+          input.type = 'checkbox';
+        } else {
+          input = el('input');
+          input.maxLength = 200;
+        }
+        input.id = id;
+        if (q.required) input.setAttribute('aria-required', 'true');
+        if (q.type === 'checkbox') label.appendChild(input);
+        var text = el('span', null, q.label + ' ');
+        text.appendChild(q.required ? el('span', null, '*') : el('span', 'muted', '(optional)'));
+        label.appendChild(text);
+        field.appendChild(label);
+        if (q.type !== 'checkbox') field.appendChild(input);
+        var error = el('p', 'field-error');
+        error.id = 'err-q' + i;
+        field.appendChild(error);
+        box.appendChild(field);
+      });
+    }
+
+    function collectAnswers() {
+      var answers = {};
+      state.questions.forEach(function (q, i) {
+        var input = $('f-q' + i);
+        answers[q.label] = q.type === 'checkbox' ? input.checked : input.value;
+      });
+      return answers;
+    }
+
+    function selectSlot(slot, item, waitlist) {
+      var previous = document.querySelector('.slot-selected');
+      if (previous) previous.classList.remove('slot-selected');
+      item.classList.add('slot-selected');
+      state.selectedSlotId = slot.slotId;
+      state.waitlist = !!waitlist;
+
+      var form = $('signup-form');
+      $('form-heading').textContent = (waitlist ? 'Join the waitlist: ' : 'Sign up: ') + slot.label;
+      setSubmitting(false);
+      $('form-slot').textContent = slot.when || '';
+      var questions = (state.page.event && state.page.event.questions) || [];
+      if (JSON.stringify(questions) !== JSON.stringify(state.questions) || !$('custom-fields').children.length) {
+        renderQuestions(questions); // keep typed answers when switching slots
+      }
+      clearFormErrors();
+      item.appendChild(form);
+      show('signup-form', true);
+      $('f-name').focus();
+    }
+
+    function closeForm() {
+      var selected = document.querySelector('.slot-selected');
+      if (selected) selected.classList.remove('slot-selected');
+      state.selectedSlotId = '';
+      show('signup-form', false);
+    }
+
+    function clearFormErrors() {
+      formFields().forEach(function (f) {
+        f.error.textContent = '';
+        f.input.removeAttribute('aria-invalid');
+        f.input.removeAttribute('aria-describedby');
+      });
+      show('form-error', false);
+    }
+
+    function showFieldErrors(fieldErrors) {
+      var first = null;
+      formFields().forEach(function (f) {
+        if (fieldErrors[f.key]) {
+          f.error.textContent = fieldErrors[f.key];
+          f.input.setAttribute('aria-invalid', 'true');
+          f.input.setAttribute('aria-describedby', f.error.id);
+          if (!first) first = f.input;
+        }
+      });
+      if (first) first.focus();
+      else if (Object.keys(fieldErrors).length) {
+        // The questions changed since the page loaded: reload them.
+        $('form-error').textContent = 'This sign-up\'s questions just changed. Please refresh the page and try again.';
+        show('form-error', true);
+      }
+    }
+
+    function setSubmitting(busy) {
+      $('submit-btn').disabled = busy;
+      $('submit-btn').textContent = state.waitlist
+        ? (busy ? 'Joining…' : 'Join waitlist')
+        : (busy ? 'Signing up…' : 'Confirm sign-up');
+    }
+
+    function onSubmit(e) {
+      e.preventDefault();
+      clearFormErrors();
+      setSubmitting(true);
+      var payload = { eventId: state.eventId, slotId: state.selectedSlotId, waitlist: state.waitlist };
+      FIELDS.forEach(function (f) { payload[f] = $('f-' + f).value; });
+      payload.answers = collectAnswers();
+      payload.baseUrl = state.page.baseUrl; // for the cancel link in the email
+      callServer('submitSignup', payload, onSubmitResult);
+    }
+
+    function onSubmitResult(result) {
+      setSubmitting(false);
+      if (result.ok) {
+        showDone(result);
+        return;
+      }
+      if (result.error === 'INVALID') {
+        showFieldErrors(result.fieldErrors || {});
+        return;
+      }
+      if (result.error === 'SLOT_FULL' || result.error === 'CLOSED' || result.error === 'NOT_FOUND' || result.error === 'SPOTS_OPEN') {
+        load(result.message); // refresh counts; message appears above the slots
+        return;
+      }
+      $('form-error').textContent = result.message || 'Something went wrong. Please try again.';
+      show('form-error', true);
+    }
+
+    function showDone(result) {
+      closeForm();
+      $('f-note').value = '';
+      show('event-view', false);
+      $('done-event').textContent = result.eventTitle;
+      $('done-slot').textContent = result.slotLabel;
+      $('done-when').textContent = result.when;
+      $('done-where').textContent = result.location || '';
+      show('done-where-label', !!result.location);
+      show('done-where', !!result.location);
+      $('done-heading').textContent = result.waitlisted ? 'You\'re on the waitlist' : 'You\'re signed up!';
+      $('done-waitlist').textContent = result.waitlisted
+        ? 'You\'re #' + result.waitlistPosition + ' on the waitlist for this slot. You\'re not confirmed yet. If someone cancels, you\'ll move up automatically and get an email.'
+        : '';
+      show('done-waitlist', !!result.waitlisted);
+      $('done-email').textContent = result.emailSent
+        ? 'A confirmation email is on its way to ' + result.email + '.'
+        : (result.waitlisted ? 'You\'re on the waitlist' : 'Your spot is saved') + ', but we couldn\'t send a confirmation email. Please note these details.';
+      $('done-organizer-link').textContent = result.organizerEmail || '';
+      $('done-organizer-link').href = result.organizerEmail ? 'mailto:' + result.organizerEmail : '#';
+      show('done-organizer', !!result.organizerEmail);
+      show('done-view', true);
+      $('done-view').focus();
+      window.scrollTo(0, 0);
+    }
+
+    // ---------- Cancel link (from the confirmation email) ----------
+
+    /** Shows the sign-up the link is for; nothing is cancelled until the volunteer confirms. */
+    function startCancel() {
+      show('loading', true);
+      var request = { eventId: state.eventId, token: state.cancelToken };
+      callServer('getCancellation', request, function (result) {
+        show('loading', false);
+        $('cancel-keep').href = eventUrl(state.eventId);
+        $('cancel-event-link').href = eventUrl(state.eventId);
+        if (!result.ok) {
+          finishCancel('We couldn\'t find that sign-up', result.message, false);
+          show('cancel-intro', false);
+        } else {
+          fillCancelDetails(result);
+          var waitlisted = result.status === 'waitlisted';
+          if (result.status === 'cancelled') {
+            finishCancel('This sign-up is already cancelled', 'Nothing more to do. You can sign up again on the event\'s page.', true);
+          } else {
+            $('cancel-heading').textContent = waitlisted ? 'Leave the waitlist?' : 'Cancel your sign-up?';
+            $('cancel-intro').textContent = 'Hi ' + result.firstName + '! ' + (waitlisted
+              ? 'You\'re on the waitlist for this slot. Leave it if you no longer want a spot.'
+              : 'If you can\'t make it, cancel below so someone else can take your spot.');
+            $('cancel-confirm-btn').textContent = waitlisted ? 'Yes, leave the waitlist' : 'Yes, cancel my sign-up';
+            $('cancel-keep').textContent = waitlisted ? 'Stay on the waitlist' : 'Keep my spot';
+            show('cancel-actions', true);
+          }
+        }
+        show('cancel-view', true);
+        $('cancel-view').focus();
+      });
+    }
+
+    function fillCancelDetails(d) {
+      document.title = 'Cancel sign-up – ' + d.eventTitle;
+      $('cancel-event').textContent = d.eventTitle;
+      $('cancel-slot').textContent = d.slotLabel;
+      $('cancel-when').textContent = d.when || '';
+      $('cancel-where').textContent = d.location || '';
+      show('cancel-when-label', !!d.when);
+      show('cancel-when', !!d.when);
+      show('cancel-where-label', !!d.location);
+      show('cancel-where', !!d.location);
+      show('cancel-details', true);
+    }
+
+    /** Final state of the cancel page: a heading, a message, and a link to the event (if it exists). */
+    function finishCancel(heading, message, showDetails) {
+      $('cancel-heading').textContent = heading;
+      $('cancel-message').textContent = message;
+      show('cancel-message', true);
+      show('cancel-details', !!showDetails);
+      show('cancel-actions', false);
+      show('cancel-intro', false);
+      show('cancel-after', !!showDetails);
+    }
+
+    function onCancelConfirm() {
+      var button = $('cancel-confirm-btn');
+      var label = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Cancelling…';
+      callServer('cancelSignup', { eventId: state.eventId, token: state.cancelToken }, function (result) {
+        button.disabled = false;
+        button.textContent = label;
+        if (result.ok) {
+          var wasWaitlisted = result.status === 'waitlisted';
+          finishCancel(wasWaitlisted ? 'You\'ve left the waitlist' : 'Your sign-up is cancelled',
+            'Thanks for letting us know. We\'ve emailed you a confirmation.', true);
+        } else if (result.error === 'ALREADY_CANCELLED') {
+          finishCancel('This sign-up is already cancelled', result.message, true);
+        } else if (result.error === 'NOT_FOUND') {
+          finishCancel('We couldn\'t find that sign-up', result.message, false);
+        } else {
+          $('cancel-message').textContent = result.message || 'Something went wrong. Please try again.';
+          show('cancel-message', true);
+        }
+        $('cancel-view').focus();
+      });
+    }
+
+    // ---------- Start ----------
+
+    $('signup-form').addEventListener('submit', onSubmit);
+    $('link-form').addEventListener('submit', onLinkSubmit);
+    $('short-btn').addEventListener('click', onShortLinkClick);
+    $('show-setup').addEventListener('click', showSetupGuide);
+    $('jump-events').addEventListener('click', function () {
+      $('open-events').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    $('cancel-btn').addEventListener('click', closeForm);
+    $('cancel-confirm-btn').addEventListener('click', onCancelConfirm);
+    $('another-btn').addEventListener('click', function () {
+      show('done-view', false);
+      show('loading', true);
+      load();
+    });
+
+    var initial = readInitialData();
+    if (initial) {
+      state.eventId = initial.requestedEventId || '';
+      state.cancelToken = initial.requestedCancel || '';
+      render(initial);
+    } else {
+      // No embedded data (the static site, or doGet hit an error): fetch it instead.
+      google.script.url.getLocation(function (location) {
+        state.eventId = (location.parameter && location.parameter.event) || '';
+        state.cancelToken = (location.parameter && location.parameter.cancel) || '';
+        load();
+      });
+    }
+  })();
+</script>
