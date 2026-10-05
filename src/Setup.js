@@ -61,11 +61,20 @@ var EVENT_FIELD_NOTES = {
   organizerEmail: 'Optional. Gets an email for every sign-up and is shown to volunteers.',
   confirmationSubject: 'Optional. Subject of the email volunteers get. Default: You\'re signed up: {event} – {slot}',
   confirmationMessage: 'Optional. Your message, added below the sign-up details in that email. ' +
-    'Can use {firstName} {name} {email} {phone} {event} {slot} {when} {location}.',
+    'Can use {firstName} {name} {email} {phone} {event} {slot} {when} {location} {eventLink} {cancelLink}. ' +
+    'Links: [words](https://…). Pictures (public address): ![description](https://…).',
+  confirmationMessageOnly: 'Optional. yes = the email is only your confirmationMessage: no greeting, details or cancel link ' +
+    '(add {cancelLink} yourself). Waitlist emails are unchanged.',
+  cancellationSubject: 'Optional. Subject of the email volunteers get when they cancel (or leave the waitlist). ' +
+    'Default: Cancelled: {event} – {slot}',
+  cancellationMessage: 'Optional. Your message, added to that email. Same placeholders as confirmationMessage ' +
+    '(including {eventLink}), except {cancelLink}.',
+  cancellationMessageOnly: 'Optional. yes = the cancellation email is only your cancellationMessage.',
   organizerSubject: 'Optional. Subject of the email organizerEmail gets for each sign-up, e.g. [Book Fair] {name} – {slot}. ' +
     'Default: New sign-up: {event} – {slot} ({name})',
-  organizerMessage: 'Optional. A note added below the volunteer\'s details in that email. ' +
-    'Can use {firstName} {name} {email} {phone} {event} {slot} {when} {location}.',
+  organizerMessage: 'Optional. A note added below the volunteer\'s details in that email (which also links to this spreadsheet). ' +
+    'Can use {firstName} {name} {email} {phone} {event} {slot} {when} {location} {eventLink} and {spreadsheetLink}, ' +
+    'e.g. [Review sign-ups]({spreadsheetLink}).',
 };
 
 var SLOT_HELP = 'One row per slot. start/end: date and time, e.g. 10/23/2026 9:00 AM. ' +
@@ -205,6 +214,10 @@ function layoutEventTab_(ss, info, changes) {
       sheet.getRange(row, 3).setValue(EVENT_FIELD_NOTES[field]);
     }
   });
+  ['confirmationmessageonly', 'cancellationmessageonly'].forEach(function (key) {
+    var row = keys().indexOf(key) + 1;
+    if (row) sheet.getRange(row, 2).setDataValidation(dropdown_(['yes', 'no'], 'yes or no.'));
+  });
   sheet.setColumnWidth(1, 170);
   sheet.setColumnWidth(2, 320);
   sheet.setColumnWidth(3, 480);
@@ -292,7 +305,11 @@ function startHereLines_() {
     h('4. Emails (optional)'),
     p('On the Event tab, confirmationSubject replaces the subject of the email volunteers get, and confirmationMessage adds your ' +
       'own note (parking, what to bring). organizerSubject and organizerMessage do the same for the email organizerEmail ' +
-      'gets for each sign-up, for example to make those emails easy to filter. All four can use {firstName} {name} {email} {phone} {event} {slot} {when} {location}.'),
+      'gets for each sign-up (it always links to this spreadsheet; {spreadsheetLink} places the link yourself), for example to make those emails easy to filter. All four can use {firstName} {name} {email} {phone} {event} {slot} {when} {location}. ' +
+      'Set confirmationMessageOnly to yes to send only your message, with no standard content; ' +
+      'include {cancelLink} so volunteers can still cancel. {eventLink} is the event\'s sign-up page. cancellationSubject, cancellationMessage and ' +
+      'cancellationMessageOnly do the same for the email volunteers get when they cancel. In messages, [words](https://…) makes a link and ' +
+      '![description](https://…) shows a picture from a public web address.'),
     h('5. Get your sign-up link'),
     p('Make sure this spreadsheet is directly in the Events folder, not in a subfolder. Then go to ' + config.siteUrl +
       ', paste this spreadsheet\'s link into "Get your sign-up link", and share the link, short link or QR code. ' +

@@ -63,7 +63,10 @@ test('home page lists open events and turns a spreadsheet link into a sign-up li
     assert.equal(await t.page.getAttribute('.folder-link', 'target'), '_blank');
     assert.equal(await t.page.getAttribute('a[href*="drive.google.com"]', 'href'),
       'https://drive.google.com/drive/folders/1yX2nxEPACkQkJLyeWYbRjd-8x0MmK55c');
-    assert.ok(await t.page.locator('a[href="mailto:admin@bishopschoolpto.com"]').first().isVisible());
+    assert.ok(await t.page.locator('a[href="mailto:admin@bishopschoolpto.com"]').first().isVisible(), 'general questions still go to admin');
+    assert.equal(await t.page.getAttribute('#request-account', 'href'),
+      'https://signups.bishopschoolpto.com/?event=1EkDCyHpBfFpl8SQ1-buQzejKkUGagznHnjjfY30GBKk');
+    assert.match(await t.page.textContent('#request-account'), /request an @bishopschoolpto\.com account/);
 
     await t.page.fill('#f-sheet', 'https://docs.google.com/spreadsheets/d/' + t.gas.eventId + '/edit#gid=0');
     await t.page.click('#link-btn');

@@ -577,7 +577,8 @@
       var label = button.textContent;
       button.disabled = true;
       button.textContent = 'Cancelling…';
-      callServer('cancelSignup', { eventId: state.eventId, token: state.cancelToken }, function (result) {
+      // baseUrl: the event page link in the emails points back to this site.
+      callServer('cancelSignup', { eventId: state.eventId, token: state.cancelToken, baseUrl: state.page.baseUrl }, function (result) {
         button.disabled = false;
         button.textContent = label;
         if (result.ok) {

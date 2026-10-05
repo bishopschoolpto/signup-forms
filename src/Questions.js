@@ -39,7 +39,7 @@ function parseQuestions_(rows) {
       label: label,
       type: type,
       options: type === 'choice' ? options : [],
-      required: /^(y|yes|true|x|required|1)$/i.test(String(row.required == null ? '' : row.required).trim()),
+      required: isYes_(row.required) || /^required$/i.test(String(row.required == null ? '' : row.required).trim()),
     });
   });
   return questions;

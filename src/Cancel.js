@@ -13,7 +13,12 @@
 var CANCEL_TOKEN_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function cancelUrl_(baseUrl, eventId, token) {
-  return pageBaseUrl_(baseUrl) + '?event=' + encodeURIComponent(eventId) + '&cancel=' + encodeURIComponent(token);
+  return eventPageUrl_(baseUrl, eventId) + '&cancel=' + encodeURIComponent(token);
+}
+
+/** The event's sign-up page, on the page the request came from (see pageBaseUrl_). */
+function eventPageUrl_(baseUrl, eventId) {
+  return pageBaseUrl_(baseUrl) + '?event=' + encodeURIComponent(eventId);
 }
 
 /**
@@ -112,7 +117,8 @@ function cancelSignup(request) {
   var config = getConfig_();
   var organizerEmail = String(found.event.organizerEmail || '').trim();
   var ctx = {
-    details: details, signup: found.signup, orgName: config.orgName, wasStatus: wasStatus,
+    details: details, event: found.event, signup: found.signup, orgName: config.orgName, wasStatus: wasStatus,
+    eventUrl: eventPageUrl_(request && request.baseUrl, found.event.eventId),
     waitlist: waitlist, promoted: promoted,
     filled: confirmedSignupsForSlot_(found.signups, found.signup.slotId).length, capacity: slot ? slot.capacity : 0,
   };
@@ -126,6 +132,7 @@ function cancelSignup(request) {
       sendEmail_(signup.email, renderConfirmationEmail_({
         event: found.event, slot: slot, signup: signup, orgName: config.orgName, promoted: true,
         when: details.when, cancelUrl: cancelUrl_('', found.event.eventId, signup.cancelToken),
+        eventUrl: eventPageUrl_('', found.event.eventId),
       }), { replyTo: organizerEmail });
     } catch (err) {
       console.error('Promotion email failed for signup ' + signup.signupId + ': ' + err);

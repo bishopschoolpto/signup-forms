@@ -130,13 +130,44 @@ events in Past events too.
 **Confirmation emails:** `confirmationSubject` replaces the subject;
 `confirmationMessage` is added below the sign-up details (line breaks kept,
 links clickable). Both can use `{firstName}` `{name}` `{email}` `{phone}`
-`{event}` `{slot}` `{when}` `{location}`. The greeting, details and organizer contact line always
-stay. Older spreadsheets can add the rows at the bottom of the Event tab.
+`{event}` `{slot}` `{when}` `{location}`, `{eventLink}` (the event's sign-up
+page) and `{cancelLink}` (the volunteer's
+personal cancel link). The greeting, details, organizer contact line and cancel
+link stay, unless `confirmationMessageOnly` is `yes`: then the email is only
+the organizer's `confirmationMessage` (and subject), so they should include
+`{cancelLink}` themselves. A blank message falls back to the standard email,
+and waitlist and "a spot opened up" emails always keep their standard text.
+
+**Cancellation emails:** `cancellationSubject`, `cancellationMessage` and
+`cancellationMessageOnly` customize the email volunteers get when they cancel
+or leave the waitlist, the same way (same placeholders, except `{cancelLink}`).
+The organizer's cancellation notice keeps its standard text.
+
+**Links and pictures in messages** (`confirmationMessage`, `cancellationMessage`, `organizerMessage`;
+`renderMessage_` in `src/Mail.js`): `[words](https://…)` makes a link,
+`![description](https://…)` an image scaled to the email's width, and bare
+`https://` addresses are clickable. Plain-text versions read "words (address)"
+and "[description]". Only `http(s)` addresses work (anything else stays as
+typed), all other text is escaped, and the Markdown is read before placeholders
+are filled, so volunteers' details can't become links or images; `{cancelLink}`,
+`{eventLink}` and `{spreadsheetLink}` (the app's own addresses)
+are the only placeholders allowed in an address. Images must be publicly
+reachable (not a private Drive file). Older spreadsheets can add the rows at the bottom of the Event tab.
+
+**Event page links:** every email links to the event's sign-up page, on the
+site the person used (`pageBaseUrl_`): "View the event page" in confirmations
+(also waitlist and "a spot opened up"), "sign up again on the event page" in
+cancellations, and "Open the event page" next to "Open the event spreadsheet"
+in organizer emails. Message-only emails add nothing; `{eventLink}` works in
+every custom field.
 
 **Organizer emails:** `organizerSubject` replaces the subject of the email
 `organizerEmail` gets for each new sign-up (waitlist entries keep a
 `Waitlist: ` prefix), and `organizerMessage` adds a note below the volunteer's
-details. Both can use the same placeholders.
+details. Both can use the same placeholders, plus `{spreadsheetLink}` (the
+event spreadsheet's address, also usable as `[words]({spreadsheetLink})`).
+Every organizer email (new sign-up and cancellation) also ends with an "Open the
+event spreadsheet" link. Volunteers' emails never include the spreadsheet link.
 The volunteer's details and the reply-to address always stay; volunteers never
 see these. Cancellation notices keep their standard subject.
 

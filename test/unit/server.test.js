@@ -22,7 +22,8 @@ test('setup creates a full template and a sample event, and a second run changes
   for (const ss of [template, sample]) {
     assert.deepEqual(ss.getSheets().map((s) => s.getName()), ['Start here', 'Event', 'Slots', 'Signups', 'Questions']);
     assert.deepEqual(Object.keys(ss.eventInfo()), ['title', 'description', 'location', 'organizerEmail',
-      'confirmationSubject', 'confirmationMessage', 'organizerSubject', 'organizerMessage']);
+      'confirmationSubject', 'confirmationMessage', 'confirmationMessageOnly',
+      'cancellationSubject', 'cancellationMessage', 'cancellationMessageOnly', 'organizerSubject', 'organizerMessage']);
   }
   assert.equal(template.eventInfo().title, 'Event name');
   assert.equal(gas.ctx.readTable_(template, 'Slots').length, 0);
@@ -439,6 +440,53 @@ test('volunteer emails can use {email} and {phone} too; a blank phone becomes no
   assert.equal(withPhone.subject, 'Reminder for pat@example.com');
   assert.match(withPhone.body, /We'll text 555-0100 if plans change\./);
   assert.match(render('').body, /We'll text  if plans change\./);
+});
+
+test('confirmationMessageOnly: yes sends only the organizer\'s message, with {cancelLink} where they put it', () => {
+  const { ctx } = loadGas();
+  const render = (extra, more = {}) => ctx.renderConfirmationEmail_({
+    event: { title: 'Book Fair', location: 'Library', organizerEmail: 'org@example.com',
+      confirmationMessage: 'Hi {firstName}! You\'re helping with {slot} at {event}, {when}.\n\nCan\'t come? {cancelLink}',
+      ...extra },
+    slot: { label: 'Setup' }, signup: { name: 'Pat Lee', email: 'p@example.com' }, when: 'Sat 9 AM', orgName: 'PTO',
+    cancelUrl: 'https://signups.example/?event=e&cancel=t', ...more,
+  });
+  const only = render({ confirmationMessageOnly: 'Yes', confirmationSubject: 'Thanks, {firstName}' });
+  assert.equal(only.subject, 'Thanks, Pat');
+  assert.equal(only.body, 'Hi Pat! You\'re helping with Setup at Book Fair, Sat 9 AM.\n\nCan\'t come? https://signups.example/?event=e&cancel=t');
+  assert.ok(only.htmlBody.includes('<a href="https://signups.example/?event=e&amp;cancel=t">'), 'the link is clickable');
+  assert.ok(!/Thanks for volunteering|Event:|Need to change something|– PTO/.test(only.body), 'no standard content');
+  assert.equal(render({ confirmationMessageOnly: 'yes' }).subject, 'You\'re signed up: Book Fair – Setup', 'default subject still applies');
+
+  const normal = render({ confirmationMessageOnly: 'no' });
+  assert.match(normal.body, /Thanks for volunteering!/);
+  assert.match(normal.body, /Can't come\? https:\/\/signups\.example/, '{cancelLink} works in normal mode too');
+
+  const blank = render({ confirmationMessageOnly: 'yes', confirmationMessage: '   ' });
+  assert.match(blank.body, /Thanks for volunteering!/, 'no message: the standard email, never a blank one');
+
+  const waitlist = render({ confirmationMessageOnly: 'yes' }, { waitlistPosition: 1 });
+  assert.match(waitlist.body, /on the waitlist for:/, 'waitlist emails keep their standard content');
+  const promoted = render({ confirmationMessageOnly: 'yes' }, { promoted: true });
+  assert.match(promoted.body, /A spot opened up/, 'so do promotion emails');
+});
+
+test('confirmationMessageOnly works end to end from the Event tab', () => {
+  const gas = loadWithEvent();
+  gas.event.setEventField('confirmationMessage', 'Thanks {firstName}! Cancel: {cancelLink}');
+  gas.event.getSheetByName('Event').appendRow(['confirmationMessageOnly', 'yes']);
+  signUp(gas, 1, 'setup');
+  const token = signups(gas)[0].cancelToken;
+  assert.equal(gas.sentMail[0].body, 'Thanks Parent! Cancel: https://signups.bishopschoolpto.com/?event=' + gas.eventId + '&cancel=' + token);
+});
+
+test('the template\'s confirmationMessageOnly row has a yes/no dropdown', () => {
+  const gas = loadGas();
+  gas.ctx.setup();
+  const sheet = gas.spreadsheet(gas.props.TEMPLATE_ID).getSheetByName('Event');
+  const row = sheet.rows.findIndex((r) => r[0] === 'confirmationMessageOnly') + 1;
+  const v = sheet.validations.find((x) => x.row === row && x.col === 2);
+  assert.deepEqual(plain(v.rule.list), ['yes', 'no']);
 });
 
 test('a custom message cannot inject HTML, and a blank one changes nothing', () => {
@@ -1549,4 +1597,239 @@ test('a past event gets its short link written too', () => {
   gas.moveTo(gas.eventId, PAST_FOLDER);
   gas.ctx.getShortLink({ eventId: gas.eventId });
   assert.equal(qrImages(gas).length, 1);
+});
+
+test('{eventTitle} and {slotTitle} are not placeholders: they stay as typed', () => {
+  const { ctx } = loadGas();
+  const msg = ctx.renderConfirmationEmail_({
+    event: { title: 'Fair', location: '', confirmationMessage: '{eventTitle} {slotTitle} = {event} {slot}' },
+    slot: { label: 'Setup' }, signup: { name: 'Pat Lee', email: 'p@example.com' }, when: 'Sat', orgName: 'PTO',
+  });
+  assert.match(msg.body, /\{eventTitle\} \{slotTitle\} = Fair Setup/);
+});
+
+// ---------- Markdown in custom email messages ----------
+
+const renderMd = (message, extra = {}) => loadGas().ctx.renderConfirmationEmail_({
+  event: { title: 'Book Fair', location: 'Library', confirmationMessage: message, ...extra },
+  slot: { label: 'Setup' }, signup: { name: 'Pat Lee', email: 'p@example.com' }, when: 'Sat', orgName: 'PTO',
+  cancelUrl: 'https://signups.example/?event=e&cancel=t',
+});
+
+test('[words](address) becomes a link on those words; plain text shows the address', () => {
+  const msg = renderMd('Park in the [back lot](https://example.com/map?a=1&b=2), {firstName}.');
+  assert.ok(msg.htmlBody.includes('Park in the <a href="https://example.com/map?a=1&amp;b=2">back lot</a>, Pat.'));
+  assert.match(msg.body, /Park in the back lot \(https:\/\/example\.com\/map\?a=1&b=2\), Pat\./);
+});
+
+test('![description](address) becomes an image that fits the email; plain text shows the description', () => {
+  const msg = renderMd('Here is the map:\n![Map of the school](https://example.com/map.png)');
+  assert.ok(msg.htmlBody.includes('<img src="https://example.com/map.png" alt="Map of the school" style="max-width:100%;height:auto;border:0">'));
+  assert.match(msg.body, /Here is the map:\n\[Map of the school\]/);
+  assert.match(renderMd('![](https://example.com/a.png)').body, /\[image\]/);
+});
+
+test('[words]({cancelLink}) links to the volunteer\'s cancel page, also in message-only emails', () => {
+  const msg = renderMd('Can\'t come? [Cancel your sign-up]({cancelLink}).', { confirmationMessageOnly: 'yes' });
+  assert.ok(msg.htmlBody.includes('<a href="https://signups.example/?event=e&amp;cancel=t">Cancel your sign-up</a>.'));
+  assert.equal(msg.body, 'Can\'t come? Cancel your sign-up (https://signups.example/?event=e&cancel=t).');
+});
+
+test('only http(s) addresses work; anything else stays as typed, escaped', () => {
+  for (const bad of ['[x](javascript:alert(1))', '[x](data:text/html,hi)', '![x](file:///etc/passwd)', '[x](mailto:a@b.co)']) {
+    const msg = renderMd(bad);
+    assert.ok(!/(href|src)="(?!https?:)/.test(msg.htmlBody), bad + ': only http(s) links and images');
+    assert.ok(!msg.htmlBody.includes('<img'), bad);
+    assert.ok(msg.body.includes(bad), bad + ': left as typed');
+  }
+  const quote = renderMd('[x](https://example.com/"onmouseover="alert(1))');
+  assert.ok(!/href="[^"]*"onmouseover/.test(quote.htmlBody));
+});
+
+test('volunteers\' details can\'t become links or images, even if they type Markdown', () => {
+  const { ctx } = loadGas();
+  const msg = ctx.renderConfirmationEmail_({
+    event: { title: 'Fair', location: '', confirmationMessage: 'Thanks {name}! [Map]({name})' },
+    slot: { label: 'Setup' }, signup: { name: '![x](https://evil.example/t.png) [click](https://evil.example)', email: 'p@x.co' },
+    when: 'Sat', orgName: 'PTO',
+  });
+  assert.ok(!msg.htmlBody.includes('<img'), 'no image from the name');
+  assert.ok(!msg.htmlBody.includes('>click</a>'), 'no link text from the name');
+  assert.ok(!msg.htmlBody.includes('href="{name}"') && !/<a href="[^"]*">Map<\/a>/.test(msg.htmlBody), '{name} is not allowed in an address');
+});
+
+test('organizer emails support the same Markdown', () => {
+  const { ctx } = loadGas();
+  const msg = ctx.renderOrganizerNotification_({
+    event: { title: 'Fair', organizerMessage: 'Add {firstName} to the [group chat](https://chat.example/x).' },
+    slot: { label: 'Setup', capacity: 2 }, signup: { name: 'Pat Lee', email: 'p@x.co' }, when: 'Sat', orgName: 'PTO', filled: 1,
+  });
+  assert.ok(msg.htmlBody.includes('Add Pat to the <a href="https://chat.example/x">group chat</a>.'));
+  assert.match(msg.body, /Add Pat to the group chat \(https:\/\/chat\.example\/x\)\./);
+});
+
+test('messages without Markdown are unchanged: bare links still clickable, line breaks kept', () => {
+  const msg = renderMd('Line one\nSee https://example.com/info.');
+  assert.ok(msg.htmlBody.includes('Line one<br>See <a href="https://example.com/info">https://example.com/info</a>.'));
+});
+
+// ---------- Custom cancellation email ----------
+
+function cancelWith(fields, { waitlisted = false } = {}) {
+  const gas = withOrganizer(loadWithEvent());
+  const sheet = gas.event.getSheetByName('Event');
+  for (const [k, v] of Object.entries(fields)) sheet.appendRow([k, v]);
+  if (waitlisted) {
+    fillSample(gas);
+    joinWaitlist(gas, 1, 'cleanup', { name: 'Pat Lee' });
+  } else {
+    signUp(gas, 1, 'cleanup', { name: 'Pat Lee', phone: '555-0100' });
+  }
+  const row = signups(gas).find((s) => s.email === 'parent1@example.com');
+  gas.sentMail.length = 0;
+  gas.ctx.cancelSignup({ eventId: gas.eventId, token: row.cancelToken });
+  return { gas, toVolunteer: gas.sentMail[0], toOrganizer: gas.sentMail[gas.sentMail.length - 1] };
+}
+
+test('organizers can set the cancellation subject and add a message (with links), keeping the standard text', () => {
+  const { toVolunteer, toOrganizer } = cancelWith({
+    cancellationSubject: 'Sorry to miss you, {firstName}',
+    cancellationMessage: 'We\'ll miss you at {slot} ({when}). Other ways to help: [PTO page](https://pto.example/help)',
+  });
+  assert.equal(toVolunteer.subject, 'Sorry to miss you, Pat');
+  assert.match(toVolunteer.body, /We've cancelled your sign-up for:\n\nEvent: .*\nSlot: Cleanup\nWhen: .*\n\nWe'll miss you at Cleanup \(.*\)\. Other ways to help: PTO page \(https:\/\/pto\.example\/help\)\n\nThanks for letting us know/);
+  assert.ok(toVolunteer.htmlBody.includes('<a href="https://pto.example/help">PTO page</a>'));
+  assert.match(toOrganizer.subject, /^Cancellation: /, 'the organizer\'s notice keeps its standard subject');
+  assert.ok(!toOrganizer.body.includes('miss you'));
+});
+
+test('cancellationMessageOnly: yes sends only the message; a blank message keeps the standard email', () => {
+  const only = cancelWith({ cancellationMessage: 'Got it, {firstName}. You\'re off {slot}.', cancellationMessageOnly: 'yes' }).toVolunteer;
+  assert.equal(only.subject, 'Cancelled: Fall Book Fair (sample) – Cleanup');
+  assert.equal(only.body, 'Got it, Pat. You\'re off Cleanup.');
+  assert.ok(!only.htmlBody.includes('Thanks for letting us know'));
+
+  const blank = cancelWith({ cancellationMessageOnly: 'yes' }).toVolunteer;
+  assert.match(blank.body, /We've cancelled your sign-up for:/);
+});
+
+test('the custom cancellation email also applies when leaving the waitlist', () => {
+  const { toVolunteer } = cancelWith({ cancellationSubject: 'Bye {firstName}' }, { waitlisted: true });
+  assert.equal(toVolunteer.subject, 'Bye Pat');
+  assert.match(toVolunteer.body, /We've cancelled your waitlist entry for:/);
+});
+
+test('{cancelLink} means nothing in a cancellation email, and {phone}/{email} work', () => {
+  const { toVolunteer } = cancelWith({ cancellationMessage: 'Sent to {email} / {phone}. [again]({cancelLink})' });
+  assert.match(toVolunteer.body, /Sent to parent1@example\.com \/ 555-0100\. \[again\]\(\{cancelLink\}\)/);
+  assert.ok(!toVolunteer.htmlBody.includes('cancel='));
+});
+
+test('the template\'s cancellationMessageOnly row has a yes/no dropdown too', () => {
+  const gas = loadGas();
+  gas.ctx.setup();
+  const sheet = gas.spreadsheet(gas.props.TEMPLATE_ID).getSheetByName('Event');
+  const row = sheet.rows.findIndex((r) => r[0] === 'cancellationMessageOnly') + 1;
+  assert.deepEqual(plain(sheet.validations.find((x) => x.row === row && x.col === 2).rule.list), ['yes', 'no']);
+});
+
+// ---------- Spreadsheet link in organizer emails ----------
+
+test('organizer emails link to the event spreadsheet; volunteer emails never do', () => {
+  const gas = withOrganizer(loadWithEvent());
+  const sheetUrl = 'https://docs.google.com/spreadsheets/d/' + gas.eventId + '/edit';
+  signUp(gas, 1, 'cleanup');
+  const [toVolunteer, toOrganizer] = gas.sentMail;
+  assert.match(toOrganizer.body, new RegExp('Open the event spreadsheet: ' + sheetUrl.replace(/[.?]/g, '\\$&')));
+  assert.ok(toOrganizer.htmlBody.includes('<a href="' + sheetUrl + '">Open the event spreadsheet</a>'));
+  assert.ok(!toVolunteer.body.includes(sheetUrl) && !toVolunteer.htmlBody.includes(sheetUrl));
+
+  gas.sentMail.length = 0;
+  gas.ctx.cancelSignup({ eventId: gas.eventId, token: signups(gas)[0].cancelToken });
+  const [cancelToVolunteer, cancelToOrganizer] = gas.sentMail;
+  assert.ok(cancelToOrganizer.htmlBody.includes('<a href="' + sheetUrl + '">Open the event spreadsheet</a>'));
+  assert.ok(cancelToOrganizer.body.includes('Open the event spreadsheet: ' + sheetUrl));
+  assert.ok(!cancelToVolunteer.body.includes(sheetUrl));
+});
+
+test('{spreadsheetLink} works in organizerMessage (also as a Markdown link) and organizerSubject', () => {
+  const gas = withOrganizer(loadWithEvent());
+  const sheetUrl = 'https://docs.google.com/spreadsheets/d/' + gas.eventId + '/edit';
+  const sheet = gas.event.getSheetByName('Event');
+  sheet.appendRow(['organizerMessage', '[Review sign-ups]({spreadsheetLink}) or paste {spreadsheetLink}']);
+  signUp(gas, 1, 'cleanup');
+  const toOrganizer = gas.sentMail[1];
+  assert.ok(toOrganizer.htmlBody.includes('<a href="' + sheetUrl + '">Review sign-ups</a> or paste <a href="' + sheetUrl + '">'));
+  assert.ok(toOrganizer.body.includes('Review sign-ups (' + sheetUrl + ') or paste ' + sheetUrl));
+});
+
+test('{spreadsheetLink} is not available in volunteer emails: it stays as typed', () => {
+  const gas = loadWithEvent();
+  gas.event.setEventField('confirmationMessage', 'See [the sheet]({spreadsheetLink}) {spreadsheetLink}');
+  signUp(gas, 1, 'setup');
+  assert.ok(gas.sentMail[0].body.includes('See [the sheet]({spreadsheetLink}) {spreadsheetLink}'));
+  assert.ok(!gas.sentMail[0].htmlBody.includes('docs.google.com'));
+});
+
+// ---------- Event page link in every email ----------
+
+const esc = (str) => str.replace(/[.?*+^$()[\]{}|\\]/g, '\\$&');
+
+test('confirmation and organizer emails link to the event page the volunteer used', () => {
+  const gas = withOrganizer(loadWithEvent());
+  signUp(gas, 1, 'cleanup', { baseUrl: 'https://script.google.com/macros/s/TEST/exec' });
+  const page = 'https://script.google.com/macros/s/TEST/exec?event=' + gas.eventId;
+  const [toVolunteer, toOrganizer] = gas.sentMail;
+  assert.match(toVolunteer.body, new RegExp('View the event page: ' + esc(page)));
+  assert.ok(toVolunteer.htmlBody.includes('<a href="' + page + '">View the event page</a>'));
+  assert.match(toOrganizer.body, new RegExp('Open the event page: ' + esc(page) + '\\nOpen the event spreadsheet: '));
+  assert.ok(toOrganizer.htmlBody.includes('<a href="' + page + '">Open the event page</a> · <a href="https://docs.google.com/'));
+
+  signUp(gas, 2, 'setup');
+  assert.ok(gas.sentMail[2].body.includes('View the event page: https://signups.bishopschoolpto.com/?event=' + gas.eventId),
+    'other pages: the static site');
+});
+
+test('cancellation emails link to the event page ("sign up again on the event page")', () => {
+  const gas = withOrganizer(loadWithEvent());
+  signUp(gas, 1, 'cleanup');
+  gas.sentMail.length = 0;
+  gas.ctx.cancelSignup({ eventId: gas.eventId, token: signups(gas)[0].cancelToken, baseUrl: 'https://script.google.com/macros/s/TEST/exec' });
+  const page = 'https://script.google.com/macros/s/TEST/exec?event=' + gas.eventId;
+  const [toVolunteer, toOrganizer] = gas.sentMail;
+  assert.ok(toVolunteer.body.includes('If this was a mistake, sign up again on the event page: ' + page));
+  assert.ok(toVolunteer.htmlBody.includes('sign up again on the <a href="' + page + '">event page</a>.'));
+  assert.ok(toOrganizer.htmlBody.includes('<a href="' + page + '">Open the event page</a>'));
+});
+
+test('waitlist and "a spot opened up" emails link to the event page too', () => {
+  const gas = loadWithEvent();
+  fillSample(gas);
+  gas.sentMail.length = 0;
+  joinWaitlist(gas, 1, 'cleanup');
+  assert.ok(gas.sentMail[0].body.includes('View the event page: '));
+  const leaving = signups(gas).find((x) => x.slotId === 'cleanup' && x.status === 'confirmed');
+  gas.sentMail.length = 0;
+  gas.ctx.cancelSignup({ eventId: gas.eventId, token: leaving.cancelToken });
+  const promoted = gas.sentMail.find((m) => m.to === 'parent1@example.com');
+  assert.ok(promoted.body.includes('View the event page: https://signups.bishopschoolpto.com/?event=' + gas.eventId));
+});
+
+test('{eventLink} works in all custom messages (also as a Markdown link); message-only emails add nothing', () => {
+  const gas = withOrganizer(loadWithEvent());
+  const page = 'https://signups.bishopschoolpto.com/?event=' + gas.eventId;
+  gas.event.setEventField('confirmationMessage', 'Details: [the event page]({eventLink})');
+  const sheet = gas.event.getSheetByName('Event');
+  sheet.appendRow(['confirmationMessageOnly', 'yes']);
+  sheet.appendRow(['organizerMessage', 'Share {eventLink} with friends']);
+  sheet.appendRow(['cancellationMessage', 'Pick another slot: [here]({eventLink})']);
+  signUp(gas, 1, 'cleanup');
+  const [toVolunteer, toOrganizer] = gas.sentMail;
+  assert.equal(toVolunteer.body, 'Details: the event page (' + page + ')', 'message-only: just the message');
+  assert.ok(toVolunteer.htmlBody.includes('<a href="' + page + '">the event page</a>'));
+  assert.ok(toOrganizer.body.includes('Share ' + page + ' with friends'));
+
+  gas.sentMail.length = 0;
+  gas.ctx.cancelSignup({ eventId: gas.eventId, token: signups(gas)[0].cancelToken });
+  assert.ok(gas.sentMail[0].htmlBody.includes('Pick another slot: <a href="' + page + '">here</a>'));
 });

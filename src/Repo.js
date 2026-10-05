@@ -3,7 +3,9 @@
  * whether it is open (see EVENT_STATE):
  *
  *   Event    key/value rows: title, description, location, organizerEmail,
- *            confirmationSubject, confirmationMessage, organizerSubject, organizerMessage
+ *            confirmationSubject, confirmationMessage, confirmationMessageOnly,
+ *            cancellationSubject, cancellationMessage, cancellationMessageOnly,
+ *            organizerSubject, organizerMessage
  *   Slots    one row per slot (table with a header row)
  *   Signups  one row per sign-up, written by the app (plus a column per question)
  *   Questions  optional: organizers' custom questions (see Questions.js)
@@ -20,6 +22,7 @@ var TABLES = {
 
 var EVENT_TAB = 'Event';
 var EVENT_FIELDS = ['title', 'description', 'location', 'organizerEmail', 'confirmationSubject', 'confirmationMessage',
+  'confirmationMessageOnly', 'cancellationSubject', 'cancellationMessage', 'cancellationMessageOnly',
   'organizerSubject', 'organizerMessage'];
 
 var SPREADSHEET_ID_PATTERN = /^[A-Za-z0-9_-]{25,100}$/;

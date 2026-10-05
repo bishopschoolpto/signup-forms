@@ -228,6 +228,7 @@ function submitSignup(rawInput) {
     waitlistPosition: waitlistPosition,
     answers: questions.map(function (q) { return [q.label, answers.value[q.label]]; }),
     cancelUrl: cancelUrl_(input.baseUrl, event.eventId, record.cancelToken),
+    eventUrl: eventPageUrl_(input.baseUrl, event.eventId),
   };
 
   // The sign-up is already saved; a mail failure (e.g. daily quota) must not undo it.
