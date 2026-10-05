@@ -1,0 +1,14 @@
+node_modules/
+test-results/
+# clasp credentials live in ~/.clasprc.json; never copy them into the repo.
+.clasprc.json
+.tmp/
+.DS_Store
+# Built by the GitHub Pages workflow (.github/workflows/pages.yml) from src/; build locally with npm run build:site.
+site/
+# Points at the previous Apps Script project; keep it out of the repo.
+.clasp.old.json
+# Personal Claude Code settings.
+.claude/settings.local.json
+# Reference screenshots (the Signups one shows a real-looking email and phone); the app doesn't use them.
+img/*.png
