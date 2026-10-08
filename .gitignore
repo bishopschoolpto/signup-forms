@@ -12,3 +12,6 @@ site/
 .claude/settings.local.json
 # Reference screenshots (the Signups one shows a real-looking email and phone); the app doesn't use them.
 img/*.png
+# Wrangler's local state and secrets (edge/).
+edge/.wrangler/
+edge/.dev.vars
