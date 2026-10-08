@@ -19,20 +19,24 @@
 function doGet(e) {
   var params = (e && e.parameter) || {};
   if (params.api === 'page') {
-    return jsonResponse_(function () { return getPageData(params.event || ''); });
+    return jsonResponse_('page', function () { return getPageData(params.event || ''); });
   }
-  if (params.api === 'events') return jsonResponse_(getOpenEvents);
+  if (params.api === 'events') return jsonResponse_('events', getOpenEvents);
   if (params.api === 'cancellation') {
-    return jsonResponse_(function () { return getCancellation({ eventId: params.event, token: params.cancel }); });
+    return jsonResponse_('cancellation', function () { return getCancellation({ eventId: params.event, token: params.cancel }); });
   }
 
+  startTiming_('html');
   var template = HtmlService.createTemplateFromFile('Index');
   template.initialJson = initialPageJson_(params.event || '', params.cancel || '');
-  return template
+  var output = template
     .evaluate()
     .setTitle(getConfig_().orgName + ' Volunteer Sign-Up')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  markTiming_('render');
+  logTiming_();
+  return output;
 }
 
 /**
@@ -42,18 +46,21 @@ function doGet(e) {
  *   { api: 'signup', input }     → submitSignup(input)
  *   { api: 'shortLink', input }  → getShortLink(input)
  *   { api: 'cancel', input }     → cancelSignup(input)
+ *   { api: 'edgeMismatch', input } → reportEdgeMismatch_(input), from the static site's edge check
  */
 function doPost(e) {
-  return jsonResponse_(function () {
-    var body;
-    try {
-      body = JSON.parse((e && e.postData && e.postData.contents) || '');
-    } catch (err) {
-      return { ok: false, error: 'INVALID', message: 'Request body must be JSON.' };
-    }
+  var body, parsed = true;
+  try {
+    body = JSON.parse((e && e.postData && e.postData.contents) || '');
+  } catch (err) {
+    parsed = false;
+  }
+  return jsonResponse_(body && body.api ? String(body.api).slice(0, 20) : 'post', function () {
+    if (!parsed) return { ok: false, error: 'INVALID', message: 'Request body must be JSON.' };
     if (body && body.api === 'signup') return submitSignup(body.input);
     if (body && body.api === 'shortLink') return getShortLink(body.input);
     if (body && body.api === 'cancel') return cancelSignup(body.input);
+    if (body && body.api === 'edgeMismatch') return reportEdgeMismatch_(body.input);
     return { ok: false, error: 'UNKNOWN_API', message: 'Unknown request.' };
   });
 }
@@ -61,9 +68,10 @@ function doPost(e) {
 /**
  * Runs fn and returns its result as JSON. Unexpected errors become
  * { serverError: true } so the browser can show its generic message instead
- * of receiving Google's HTML error page.
+ * of receiving Google's HTML error page. api names the request in the timing log.
  */
-function jsonResponse_(fn) {
+function jsonResponse_(api, fn) {
+  startTiming_(api);
   var payload;
   try {
     payload = fn();
@@ -71,7 +79,11 @@ function jsonResponse_(fn) {
     console.error('API error: ' + (err && err.stack || err));
     payload = { serverError: true };
   }
-  return ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(ContentService.MimeType.JSON);
+  markTiming_('handler');
+  var output = ContentService.createTextOutput(JSON.stringify(payload)).setMimeType(ContentService.MimeType.JSON);
+  markTiming_('serialize');
+  logTiming_();
+  return output;
 }
 
 /** Used by Index.html as <?!= include('Styles') ?>. */
@@ -111,21 +123,26 @@ function initialPageJson_(eventId, cancelToken) {
  */
 function getPageData(eventId) {
   var config = getConfig_();
+  markTiming_('config');
   var page = { orgName: config.orgName, baseUrl: ScriptApp.getService().getUrl(), event: null };
+  markTiming_('serviceUrl');
   var id = String(eventId || '').trim();
   var state = getEventState_(id);
+  markTiming_('state');
   if (state === EVENT_STATE.NONE) return page;
 
   page.event = getCachedPublicEvent_(id);
+  markTiming_('cache');
+  noteTiming_('cacheHit', !!page.event);
   if (!page.event) {
     var ss = openEventSpreadsheet_(id);
+    markTiming_('open');
     page.event = ss ? buildEventView_(ss, state === EVENT_STATE.OPEN) : null;
+    markTiming_('read');
     if (page.event) cachePublicEvent_(id, page.event);
+    markTiming_('cachePut');
   }
-  if (page.event) {
-    page.event.isOpen = state === EVENT_STATE.OPEN;
-    page.event.waitlistOpen = page.event.isOpen && !!page.event.allSlotsFull;
-  }
+  if (page.event) applyEventState_(page.event, state);
   return page;
 }
 
@@ -138,15 +155,21 @@ function getPageData(eventId) {
  */
 function getOpenEvents() {
   var events = getCachedOpenEvents_();
+  markTiming_('cache');
+  noteTiming_('cacheHit', !!events);
   if (!events) {
     refreshEventCaches_();
+    markTiming_('refresh');
     events = getCachedOpenEvents_() || [];
   }
-  return {
-    events: events.map(function (e) {
-      return { eventId: e.eventId, title: e.title, location: e.location, dates: e.dates, spotsLeft: e.spotsLeft, waitlistOpen: !!e.waitlistOpen };
-    }),
-  };
+  return { events: publicOpenEvents_(events) };
+}
+
+/** Only the fields the home page shows. */
+function publicOpenEvents_(events) {
+  return events.map(function (e) {
+    return { eventId: e.eventId, title: e.title, location: e.location, dates: e.dates, spotsLeft: e.spotsLeft, waitlistOpen: !!e.waitlistOpen };
+  });
 }
 
 /**
@@ -215,6 +238,7 @@ function submitSignup(rawInput) {
     var view = buildPublicEvent_(event, slots, signups.concat([record]), makeWhenFormatter_(getConfig_().timeZone));
     view.questions = questions;
     cachePublicEvent_(event.eventId, view);
+    publishEventToEdge_(event.eventId, view);
   } finally {
     lock.releaseLock();
   }

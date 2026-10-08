@@ -189,6 +189,7 @@ file. It skips Google's page frame and calls Apps Script only for data:
 | `GET …/exec?api=events` | open events with spots left (JSON) |
 | `POST …/exec` body `{"api":"signup","input":{…}}` as `text/plain` | sign-up (JSON) |
 | `POST …/exec` body `{"api":"shortLink","input":{"eventId":…}}` as `text/plain` | TinyURL for the event (JSON) |
+| `POST …/exec` body `{"api":"edgeMismatch","input":{…}}` as `text/plain` | logs a difference the edge check found (see "Cloudflare edge") |
 
 The home page (no `?event=`) appears without waiting for any API call, then
 fetches the open events list: the org name is built into the page (`orgName` in `site.config.json`, default "Bishop School PTO";
@@ -231,6 +232,72 @@ long to show up. Free GitHub Pages needs a **public** repository: everything
 committed is public (no secrets live in the repo; the TinyURL token and other
 settings are Script Properties).
 
+### Cloudflare edge (fast first load)
+
+Apps Script takes about 1–2 seconds to answer even a cached request, and
+sometimes much longer. So the static site reads an event page's first load,
+and the home page's open events list, from a Cloudflare Worker (`edge/`)
+instead. Apps Script pushes the data there; the Worker never calls Google.
+
+| Request | Worker |
+|---|---|
+| `GET <edge>/events/<id>` | `{ event, publishedAt }`, the same view `?api=page` returns |
+| `GET <edge>/events` | `{ events, publishedAt }`, the same list `?api=events` returns |
+| `POST <edge>/publish` with `Authorization: Bearer <secret>` | Apps Script only (`src/Edge.js`) |
+
+- **When it publishes:** the 1-minute timer sends only views that changed,
+  removes events that left the Events and Past events folders, and checks
+  in at least every 10 minutes. A sign-up or cancellation publishes its
+  event at once.
+- **Freshness:** a change reaches every Cloudflare location within about a
+  minute (KV's edge cache). Anything that must be current still asks Apps
+  Script: sign-ups (capacity is checked in the sheet), every refresh after
+  the first load, and, for a few minutes, the first load in a browser that
+  just signed up or cancelled.
+- **Fallback:** if the Worker is unreachable, slower than 3 seconds, doesn't
+  have the event, or hasn't heard from Apps Script for 20 minutes (the timer
+  stopped), the page asks Apps Script, as it did before.
+- **Checking it:** on 5% of loads served by the edge (`edgeCheckRate` in
+  `site.config.json`), the page also asks Apps Script in the background,
+  after rendering. If they differ, it reports to Apps Script, which logs an
+  `edge mismatch` line (Executions) with the differences and a likely cause:
+  `not-published` (a change the timer hasn't sent yet; normal for up to a
+  minute), `propagating` (sent, still reaching Cloudflare's locations),
+  `edge-behind` (still not there after 2 minutes: a problem) or
+  `unexplained` (the edge has the latest data yet differs: a bug). Reports
+  are capped at 60 an hour. Add `?compare=1` to any event link to check that
+  load yourself: the result appears in the browser console and nothing is
+  reported.
+- **Privacy:** the Worker holds exactly what the page already shows anyone
+  (volunteers as "Jane D.", no emails, phones or cancel tokens).
+- **Cost:** Cloudflare's free plan covers it (KV allows 1,000 writes a day;
+  each publish writes once per changed event, plus a check-in).
+
+One-time setup (needs a free Cloudflare account, and Node 22 or later for
+Wrangler, Cloudflare's CLI):
+
+```sh
+cd edge
+npx wrangler login
+npx wrangler kv namespace create EVENTS     # put the printed id in wrangler.toml
+openssl rand -hex 32                        # the publish secret
+npx wrangler secret put PUBLISH_SECRET      # paste the secret
+npx wrangler deploy                         # prints https://signups-edge.<account>.workers.dev
+```
+
+Then:
+
+1. In Apps Script's Script Properties, set `EDGE_URL` to the Worker's URL
+   and `EDGE_SECRET` to the same secret. Within a minute the timer
+   publishes every event (Executions → `refreshEventCaches` logs `"edge":{…}`).
+2. Check `<EDGE_URL>/events` shows the open events.
+3. Set `edgeUrl` in `site.config.json` to the Worker's URL and push `main`;
+   GitHub Pages rebuilds the site to use it.
+
+To turn it off, remove `edgeUrl` from `site.config.json` (the site goes back
+to asking Apps Script) and the two Script Properties. Redeploy the Worker
+after changing `edge/worker.js`: `cd edge && npx wrangler deploy`.
+
 > **Security rule:** Apps Script lets any visitor call any global function
 > whose name doesn't end in `_`. Every internal helper ends in `_`, and
 > `test/unit/security.test.js` fails if a new public function appears.
@@ -242,6 +309,9 @@ npm test          # unit tests: logic, sheet access, locking, email, security
 npm run test:ui   # headless-browser tests of the real page
 npm run dev       # local preview (in-memory fake Drive and Sheets), incl. the static site at /static
 ```
+
+The dev server also runs the real Worker at `/edge` (in-memory KV) and the
+static site reading from it at `/static-edge`.
 
 `npm run dev` runs the real server code against fakes of the Google services
 (`test/helpers/gas.js`). `/__mail` shows the emails that would have been sent
@@ -283,6 +353,7 @@ Google's `Utilities.formatDate` output.
 | `MAIL_REDIRECT_TO` | Send **all** emails here instead. Remove it for production |
 | `TINYURL_API_TOKEN` | API token from a TinyURL account (developer page: https://tinyurl.com/app/dev). Without it, the deprecated keyless API is used |
 | `SITE_URL` | Where short links point (default `https://signups.bishopschoolpto.com/`) |
+| `EDGE_URL`, `EDGE_SECRET` | The Cloudflare Worker that serves event data to the static site, and its publish secret (see "Cloudflare edge"). Without both, nothing is published |
 
 **`setup()` is safe to run any time**, and worth re-running after an update:
 it only creates what's missing. Every spreadsheet it makes, and the existing

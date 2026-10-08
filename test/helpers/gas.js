@@ -170,6 +170,7 @@ function loadGas({ properties = {}, timeZone = MANIFEST.timeZone, lockAvailable 
   const lockLog = [];
   const driveLog = [];
   const fetchLog = [];
+  const edgePublishes = [];
   const fetchRequests = [];
   const cache = new Map();
   const props = { ...properties };
@@ -310,7 +311,10 @@ function loadGas({ properties = {}, timeZone = MANIFEST.timeZone, lockAvailable 
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: (k) => (k in props ? props[k] : null),
+        getProperties: () => ({ ...props }),
         setProperty: (k, v) => { props[k] = String(v); },
+        setProperties: (values) => { Object.entries(values).forEach(([k, v]) => { props[k] = String(v); }); },
+        deleteProperty: (k) => { delete props[k]; },
       }),
     },
     Session: {
@@ -337,6 +341,13 @@ function loadGas({ properties = {}, timeZone = MANIFEST.timeZone, lockAvailable 
       fetch(url, options = {}) {
         fetchLog.push(url);
         fetchRequests.push({ url, options });
+        // The Cloudflare edge (src/Edge.js): records each publish; edgeReply overrides the answer.
+        if (props.EDGE_URL && url.startsWith(props.EDGE_URL)) {
+          const edgeReply = ctx.UrlFetchApp.edgeReply || { code: 200, text: '{"ok":true}' };
+          if (edgeReply.throws) throw new Error(edgeReply.throws);
+          edgePublishes.push({ url, auth: (options.headers || {}).Authorization, body: JSON.parse(options.payload) });
+          return { getResponseCode: () => edgeReply.code, getContentText: () => edgeReply.text };
+        }
         const links = ctx.UrlFetchApp.tinyUrls; // alias → long URL, for every TinyURL "made" so far
         const visit = /^https:\/\/tinyurl\.com\/([A-Za-z0-9_-]+)$/.exec(url);
         if (visit) { // Visiting a short link: TinyURL redirects to its long URL.
@@ -366,6 +377,7 @@ function loadGas({ properties = {}, timeZone = MANIFEST.timeZone, lockAvailable 
         return { getResponseCode: () => reply.code, getContentText: () => reply.text };
       },
       nextReply: null,
+      edgeReply: null,
       tinyUrls: {},
     },
     ScriptApp: {
@@ -394,6 +406,7 @@ function loadGas({ properties = {}, timeZone = MANIFEST.timeZone, lockAvailable 
     driveLog,
     fetchLog,
     fetchRequests,
+    edgePublishes,
     cache,
     session,
     drive,

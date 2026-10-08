@@ -13,16 +13,18 @@ let browser;
 test.before(async () => { browser = await chromium.launch(); });
 test.after(async () => { await browser.close(); });
 
-async function open(pathname, viewport) {
-  const server = createServer();
+async function open(pathname, viewport, serverOptions) {
+  const server = createServer(serverOptions);
   await new Promise((resolve) => server.listen(0, resolve));
   const base = 'http://localhost:' + server.address().port;
   const page = await browser.newPage(viewport ? { viewport } : undefined);
   const errors = [];
+  const consoleLines = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => consoleLines.push(m.type() + ': ' + m.text()));
   await page.goto(base + pathname.replace('EVENT', server.gas.eventId));
   return {
-    page, base, server, gas: server.gas, errors,
+    page, base, server, gas: server.gas, errors, consoleLines,
     close: async () => { await page.close(); server.close(); },
   };
 }
@@ -323,5 +325,152 @@ test('static site fits a phone screen', async () => {
     await t.page.click('#slot-setup button');
     const overflow = await t.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 0, 'page is ' + overflow + 'px wider than the screen');
+  } finally { await t.close(); }
+});
+
+// ---------- Cloudflare edge (edge/worker.js, served by the dev server at /edge) ----------
+
+test('with an edge, the event page loads from it without calling Apps Script', async () => {
+  const t = await open('/static-edge?event=EVENT');
+  try {
+    await t.page.waitForSelector('#event-view:not([hidden])');
+    assert.equal(await t.page.textContent('#event-title'), 'Fall Book Fair (sample)');
+    assert.equal(await t.page.locator('.slot').count(), 3);
+    assert.deepEqual(t.server.edgeLog, ['GET /events/' + t.gas.eventId]);
+    assert.deepEqual(t.server.apiLog, [], 'Apps Script not called');
+    assert.deepEqual(t.errors, []);
+  } finally { await t.close(); }
+});
+
+test('with an edge, the home page lists open events from it', async () => {
+  const t = await open('/static-edge');
+  try {
+    await t.page.waitForSelector('#open-events-list:not([hidden])');
+    assert.match(await t.page.textContent('#open-events-list'), /Fall Book Fair \(sample\)/);
+    assert.deepEqual(t.server.edgeLog, ['GET /events']);
+    assert.deepEqual(t.server.apiLog, []);
+  } finally { await t.close(); }
+});
+
+test('if the edge lacks the event or is stale, the page asks Apps Script', async () => {
+  const t = await open('/static-edge?event=EVENT');
+  try {
+    await t.page.waitForSelector('#event-view:not([hidden])');
+    t.server.edgeEnv.EVENTS.data.delete('event:' + t.gas.eventId);
+    t.server.apiLog.length = 0;
+    await t.page.reload();
+    await t.page.waitForSelector('#event-view:not([hidden])');
+    assert.equal(await t.page.textContent('#event-title'), 'Fall Book Fair (sample)');
+    assert.deepEqual(t.server.apiLog, ['GET page'], 'not published: fell back');
+
+    t.server.edgeEnv.EVENTS.data.set('meta:syncedAt', String(Date.now() - 60 * 60 * 1000));
+    t.server.apiLog.length = 0;
+    await t.page.goto(t.base + '/static-edge');
+    await t.page.waitForSelector('#open-events-list:not([hidden])');
+    assert.deepEqual(t.server.apiLog, ['GET events'], 'stale: fell back');
+  } finally { await t.close(); }
+});
+
+test('if the edge is unreachable, the page still loads from Apps Script', async () => {
+  const t = await open('/static-edge?event=EVENT');
+  try {
+    await t.page.route('**/edge/**', (route) => route.abort());
+    t.server.apiLog.length = 0;
+    await t.page.reload();
+    await t.page.waitForSelector('#event-view:not([hidden])');
+    assert.deepEqual(t.server.apiLog, ['GET page']);
+  } finally { await t.close(); }
+});
+
+test('after signing up, the next page load skips the edge, and the edge has the sign-up', async () => {
+  const t = await open('/static-edge?event=EVENT');
+  try {
+    await t.page.click('#slot-checkout button');
+    await t.page.fill('#f-name', 'Jane Doe');
+    await t.page.fill('#f-email', 'jane@example.com');
+    await t.page.click('#submit-btn');
+    await t.page.waitForSelector('#done-view:not([hidden])');
+
+    t.server.edgeLog.length = 0;
+    t.server.apiLog.length = 0;
+    await t.page.reload();
+    await t.page.waitForSelector('#event-view:not([hidden])');
+    assert.deepEqual(t.server.edgeLog, [], 'skipped: this browser just changed the event');
+    assert.deepEqual(t.server.apiLog, ['GET page']);
+    assert.match(await t.page.textContent('#slot-checkout'), /Jane D\./);
+
+    // Another browser gets it from the edge, already updated.
+    const other = await browser.newPage();
+    try {
+      await other.goto(t.base + '/static-edge?event=' + t.gas.eventId);
+      await other.waitForSelector('#event-view:not([hidden])');
+      assert.match(await other.textContent('#slot-checkout'), /Jane D\./);
+      assert.deepEqual(t.server.apiLog, ['GET page'], 'no Apps Script call for the other browser');
+    } finally { await other.close(); }
+  } finally { await t.close(); }
+});
+
+// ---------- Edge check: comparing the edge's copy with Apps Script ----------
+
+/** Waits until the dev server has seen an Apps Script request. */
+async function waitForApi(t, entry) {
+  for (let i = 0; i < 100 && !t.server.apiLog.includes(entry); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(t.server.apiLog.includes(entry), entry + ' in ' + JSON.stringify(t.server.apiLog));
+}
+
+test('?compare=1 checks the edge against Apps Script and logs the result, without reporting', async () => {
+  const t = await open('/static-edge?event=EVENT&compare=1');
+  try {
+    await t.page.waitForSelector('#event-view:not([hidden])');
+    await waitForApi(t, 'GET page');
+    for (let i = 0; i < 40 && !t.consoleLines.some((l) => l.includes('[edge check]')); i++) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(t.consoleLines.some((l) => /^info: \[edge check\] event \S+ matches Apps Script \(edge copy published \d+s ago\)/.test(l)), t.consoleLines.join('\n'));
+    assert.deepEqual(t.server.edgeLog, ['GET /events/' + t.gas.eventId], 'rendered from the edge');
+
+    // Make the edge's copy differ: compare mode logs it but reports nothing.
+    const key = 'event:' + t.gas.eventId;
+    const view = JSON.parse(t.server.edgeEnv.EVENTS.data.get(key));
+    view.title = 'Old title';
+    t.server.edgeEnv.EVENTS.data.set(key, JSON.stringify(view));
+    t.consoleLines.length = 0;
+    await t.page.reload();
+    await t.page.waitForSelector('#event-view:not([hidden])');
+    assert.equal(await t.page.textContent('#event-title'), 'Old title');
+    for (let i = 0; i < 40 && !t.consoleLines.some((l) => l.includes('differs')); i++) await new Promise((r) => setTimeout(r, 50));
+    const line = t.consoleLines.find((l) => l.includes('differs'));
+    assert.ok(line && line.startsWith('warning: '), t.consoleLines.join('\n'));
+    assert.match(line, /title: edge "Old title", apps script "Fall Book Fair \(sample\)"/);
+    assert.ok(!t.server.apiLog.includes('POST edgeMismatch'));
+  } finally { await t.close(); }
+});
+
+test('a sampled page load reports a difference to Apps Script, after rendering', async () => {
+  const t = await open('/static-edge', undefined, { edgeCheckRate: 1 });
+  try {
+    await t.page.waitForSelector('#open-events-list:not([hidden])');
+    await waitForApi(t, 'GET events');
+    await new Promise((r) => setTimeout(r, 200));
+    assert.ok(!t.server.apiLog.includes('POST edgeMismatch'), 'the same: nothing reported');
+
+    const key = 'event:' + t.gas.eventId;
+    const view = JSON.parse(t.server.edgeEnv.EVENTS.data.get(key));
+    view.slots[0].filled = 99;
+    t.server.edgeEnv.EVENTS.data.set(key, JSON.stringify(view));
+    t.server.apiLog.length = 0;
+    const warnings = [];
+    const warn = console.warn;
+    console.warn = (line) => warnings.push(String(line));
+    try {
+      await t.page.goto(t.base + '/static-edge?event=' + t.gas.eventId);
+      await t.page.waitForSelector('#event-view:not([hidden])');
+      await waitForApi(t, 'POST edgeMismatch');
+      assert.deepEqual(t.server.apiLog, ['GET page', 'POST edgeMismatch']);
+    } finally { console.warn = warn; }
+    const logged = warnings.find((l) => l.startsWith('edge mismatch '));
+    assert.ok(logged, warnings.join('\n'));
+    const entry = JSON.parse(logged.slice('edge mismatch '.length));
+    assert.equal(entry.eventId, t.gas.eventId);
+    assert.match(entry.diffs.join(), /slots\[0\]\.filled: edge 99, apps script 0/);
+    assert.equal(entry.cause, 'unexplained', 'the edge has the latest publish, yet differs');
   } finally { await t.close(); }
 });

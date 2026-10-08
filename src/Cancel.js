@@ -109,7 +109,7 @@ function cancelSignup(request) {
       }
     }
     SpreadsheetApp.flush();
-    refreshCachedView_(found);
+    publishEventToEdge_(found.event.eventId, refreshCachedView_(found));
   } finally {
     lock.releaseLock();
   }
@@ -148,9 +148,10 @@ function cancelSignup(request) {
   return details;
 }
 
-/** Puts the event's updated public view in the cache (its open/closed state is applied when served). */
+/** Puts the event's updated public view in the cache (its open/closed state is applied when served), and returns it. */
 function refreshCachedView_(found) {
   var view = buildPublicEvent_(found.event, readTable_(found.ss, 'Slots'), found.signups, makeWhenFormatter_(getConfig_().timeZone));
   view.questions = readQuestions_(found.ss);
   cachePublicEvent_(found.event.eventId, view);
+  return view;
 }

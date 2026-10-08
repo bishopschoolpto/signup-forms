@@ -1,0 +1,6 @@
+{
+  "name": "signups-edge",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker that serves event data to the static sign-up site (see worker.js)"
+}

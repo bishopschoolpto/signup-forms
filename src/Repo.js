@@ -62,6 +62,7 @@ function eventFolderCacheKey_(fileId) {
 function getEventState_(fileId) {
   if (!SPREADSHEET_ID_PATTERN.test(fileId)) return EVENT_STATE.NONE;
   var hit = CacheService.getScriptCache().get(eventFolderCacheKey_(fileId));
+  noteTiming_('stateCacheHit', !!hit);
   return hit || readEventState_(fileId);
 }
 

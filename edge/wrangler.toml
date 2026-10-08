@@ -1,0 +1,17 @@
+# Cloudflare Worker that serves event data to the static site (see worker.js
+# and "Cloudflare edge" in README.md). Deploy with: npx wrangler deploy
+name = "signups-edge"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# Created with: npx wrangler kv namespace create EVENTS
+[[kv_namespaces]]
+binding = "EVENTS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# The publish secret is not stored here. Set it with:
+#   npx wrangler secret put PUBLISH_SECRET
+# and put the same value in the EDGE_SECRET script property.
+
+# Optional, if bishopschoolpto.com's DNS is on Cloudflare:
+# routes = [{ pattern = "signups-edge.bishopschoolpto.com", custom_domain = true }]

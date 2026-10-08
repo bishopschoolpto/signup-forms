@@ -67,6 +67,9 @@ test('home page lists open events and turns a spreadsheet link into a sign-up li
     assert.equal(await t.page.getAttribute('#request-account', 'href'),
       'https://signups.bishopschoolpto.com/?event=1EkDCyHpBfFpl8SQ1-buQzejKkUGagznHnjjfY30GBKk');
     assert.match(await t.page.textContent('#request-account'), /request an @bishopschoolpto\.com account/);
+    assert.ok(await t.page.isVisible('#request-account-intro'), 'the account requirement is visible without opening the steps');
+    assert.equal(await t.page.getAttribute('#request-account-intro', 'href'), await t.page.getAttribute('#request-account', 'href'));
+    assert.match(await t.page.textContent('#home-view'), /You'll need an @bishopschoolpto\.com account to open it/);
 
     await t.page.fill('#f-sheet', 'https://docs.google.com/spreadsheets/d/' + t.gas.eventId + '/edit#gid=0');
     await t.page.click('#link-btn');

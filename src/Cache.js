@@ -9,7 +9,8 @@
  * their expiry extended. So:
  *   - first-time visitors usually get a cached page;
  *   - edits typed into a spreadsheet show up within about a minute;
- *   - a sign-up writes the new view into the cache immediately.
+ *   - a sign-up writes the new view into the cache immediately;
+ *   - each run then publishes changed views to the Cloudflare edge (Edge.js).
  * Sign-ups never trust the cache: capacity is always re-checked in the sheet.
  */
 
@@ -74,8 +75,12 @@ function buildEventView_(ss, isOpen) {
  * called by one of this project's own triggers.
  */
 function refreshEventCaches(e) {
+  startTiming_('timer');
   if (!isProjectTrigger_(e)) throw new Error('refreshEventCaches only runs from its timer.');
-  return refreshEventCaches_();
+  markTiming_('triggerCheck');
+  var stats = refreshEventCaches_();
+  logTiming_();
+  return stats;
 }
 
 function isProjectTrigger_(e) {
@@ -90,9 +95,11 @@ function refreshEventCaches_() {
   var stats = { events: 0, reused: 0, rebuilt: 0, hidden: 0, failed: 0, skippedForTime: 0 };
 
   var files = listEventSpreadsheets_();
+  noteTiming_('files', files.length);
   files.forEach(function (file) {
     // Listed from its folder, so its folder check is known: refresh it too.
     cacheEventState_(file.id, file.state);
+    markTiming_('folderStateCache');
     if (file.state === EVENT_STATE.NONE) return; // the Event Template
     stats.events++;
     if (Date.now() - started > REFRESH_BUDGET_MS) { stats.skippedForTime++; return; }
@@ -101,6 +108,7 @@ function refreshEventCaches_() {
     if (state === file.modifiedTime + '|hidden') {
       cache.put(eventStateCacheKey_(file.id), state, PUBLIC_EVENT_CACHE_SECONDS);
       stats.hidden++;
+      markTiming_('reuse');
       return;
     }
     var view = cache.get(publicEventCacheKey_(file.id));
@@ -108,8 +116,10 @@ function refreshEventCaches_() {
       cache.put(publicEventCacheKey_(file.id), view, PUBLIC_EVENT_CACHE_SECONDS);
       cache.put(eventStateCacheKey_(file.id), state, PUBLIC_EVENT_CACHE_SECONDS);
       stats.reused++;
+      markTiming_('reuse');
       return;
     }
+    markTiming_('reuse'); // the cache checks that found it changed
     try {
       var built = buildEventView_(SpreadsheetApp.openById(file.id), file.state === EVENT_STATE.OPEN);
       if (built) {
@@ -123,10 +133,14 @@ function refreshEventCaches_() {
       console.warn('Could not refresh event ' + file.id + ': ' + err);
       stats.failed++;
     }
+    markTiming_('rebuild');
   });
 
   stats.listed = cacheOpenEvents_(files);
-  console.log('Event cache refresh: ' + JSON.stringify(stats));
+  markTiming_('openEventsList');
+  var edge = syncEdge_(files);
+  if (edge) stats.edge = edge;
+  console.log('Event cache refresh (' + (Date.now() - started) + ' ms): ' + JSON.stringify(stats));
   return stats;
 }
 
@@ -167,6 +181,7 @@ function getCachedOpenEvents_() {
  */
 function listEventSpreadsheets_() {
   var config = getConfig_();
+  markTiming_('config');
   var found = [];
   [config.eventsFolderId, config.pastEventsFolderId].forEach(function (folderId) {
     var pageToken;
@@ -179,10 +194,12 @@ function listEventSpreadsheets_() {
         supportsAllDrives: true,
         includeItemsFromAllDrives: true,
       });
+      markTiming_('driveList');
       (page.files || []).forEach(function (f) {
         if (f.mimeType !== SPREADSHEET_MIME_TYPE) return;
         found.push({ id: f.id, modifiedTime: f.modifiedTime, state: eventStateFor_(f.id, [folderId]) });
       });
+      markTiming_('folderState');
       pageToken = page.nextPageToken;
     } while (pageToken);
   });
