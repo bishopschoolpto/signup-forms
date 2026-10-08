@@ -7,7 +7,7 @@ compatibility_date = "2026-10-01"
 # Created with: npx wrangler kv namespace create EVENTS
 [[kv_namespaces]]
 binding = "EVENTS"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "113e82b674024ac5b84a4af53f94dc94"
 
 # The publish secret is not stored here. Set it with:
 #   npx wrangler secret put PUBLISH_SECRET
